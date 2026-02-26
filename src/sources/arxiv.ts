@@ -4,6 +4,7 @@ import type { RadarConfig } from "../config.js";
 import type { Candidate } from "./types.js";
 
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
+const MAX_DESCRIPTION_LENGTH = 1000;
 
 interface ArxivEntry {
   id: string;
@@ -16,14 +17,24 @@ interface ArxivEntry {
 function buildArxivQuery(config: RadarConfig): string {
   const arxiv = config.sources.arxiv!;
   const catParts = arxiv.categories.map((c) => `cat:${c}`);
-  const catQuery = catParts.length > 1 ? `(${catParts.join("+OR+")})` : catParts[0];
+  const catQuery =
+    catParts.length > 1 ? `(${catParts.join(" OR ")})` : catParts[0];
 
-  const kwParts = arxiv.keywords.map(
-    (kw) => `all:${kw.replace(/\s+/g, "+")}`
-  );
-  const kwQuery = kwParts.length > 1 ? `(${kwParts.join("+OR+")})` : kwParts[0];
+  const kwParts = arxiv.keywords.map((kw) => `all:"${kw}"`);
+  const kwQuery =
+    kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
 
-  return `${catQuery}+AND+${kwQuery}`;
+  return `${catQuery} AND ${kwQuery}`;
+}
+
+function buildArxivUrl(query: string): string {
+  const url = new URL(ARXIV_API_URL);
+  url.searchParams.set("search_query", query);
+  url.searchParams.set("start", "0");
+  url.searchParams.set("max_results", "50");
+  url.searchParams.set("sortBy", "submittedDate");
+  url.searchParams.set("sortOrder", "descending");
+  return url.toString();
 }
 
 function parseAuthors(
@@ -42,7 +53,7 @@ export async function collectArxiv(
   if (!config.sources.arxiv) return [];
 
   const query = buildArxivQuery(config);
-  const url = `${ARXIV_API_URL}?search_query=${query}&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending`;
+  const url = buildArxivUrl(query);
 
   core.info(`arXiv query URL: ${url}`);
 
@@ -70,7 +81,10 @@ export async function collectArxiv(
     return entries.map((entry) => ({
       url: typeof entry.id === "string" ? entry.id : String(entry.id),
       title: String(entry.title).replace(/\s+/g, " ").trim(),
-      description: String(entry.summary).replace(/\s+/g, " ").trim(),
+      description: String(entry.summary)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, MAX_DESCRIPTION_LENGTH),
       source: "arxiv" as const,
       metadata: {
         authors: parseAuthors(entry.author),
@@ -85,4 +99,4 @@ export async function collectArxiv(
   }
 }
 
-export { buildArxivQuery };
+export { buildArxivQuery, buildArxivUrl };

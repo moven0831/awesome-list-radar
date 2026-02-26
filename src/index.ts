@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { loadConfig } from "./config.js";
 import { runPipeline } from "./pipeline.js";
-import { collectAll } from "./sources/github.js";
+import { collectGitHub } from "./sources/github.js";
 import { collectArxiv } from "./sources/arxiv.js";
 import { collectBlogs } from "./sources/blogs.js";
 import { filterCandidates } from "./filter/keywords.js";
@@ -15,7 +15,7 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   if (config.sources.github) {
-    candidates.push(...(await collectAll(config)));
+    candidates.push(...(await collectGitHub(config)));
   }
   if (config.sources.arxiv) {
     candidates.push(...(await collectArxiv(config)));

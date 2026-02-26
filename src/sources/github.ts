@@ -3,25 +3,33 @@ import * as core from "@actions/core";
 import type { RadarConfig } from "../config.js";
 import type { Candidate } from "./types.js";
 
+const MAX_DESCRIPTION_LENGTH = 1000;
+
 function createdAfterDate(spec: string): string {
   const days = parseInt(spec.replace("d", ""), 10);
+  if (Number.isNaN(days)) {
+    throw new Error(`Invalid date spec: ${spec}`);
+  }
   const date = new Date();
   date.setDate(date.getDate() - days);
   return date.toISOString().split("T")[0];
 }
 
-function buildSearchQuery(config: RadarConfig): string {
+function buildSearchQuery(
+  topics: string[],
+  config: RadarConfig
+): string {
   const gh = config.sources.github!;
   const parts: string[] = [];
 
-  for (const topic of gh.topics) {
-    parts.push(`topic:${topic}`);
-  }
+  // Use OR for topics: match repos with any of the listed topics
+  const topicClauses = topics.map((t) => `topic:${t}`);
+  parts.push(topicClauses.join(" "));
 
   if (gh.languages) {
-    for (const lang of gh.languages) {
-      parts.push(`language:${lang}`);
-    }
+    // Use OR for languages: match repos in any of the listed languages
+    const langClauses = gh.languages.map((l) => `language:${l}`);
+    parts.push(langClauses.join(" "));
   }
 
   if (gh.min_stars > 0) {
@@ -42,13 +50,16 @@ export async function collectGitHub(
 
   const client =
     octokit ?? new Octokit({ auth: core.getInput("github_token") });
-  const query = buildSearchQuery(config);
+  const query = buildSearchQuery(config.sources.github.topics, config);
 
   core.info(`GitHub search query: ${query}`);
 
   const candidates: Candidate[] = [];
 
   try {
+    // Note: fetches a single page (100 results) sorted by stars.
+    // GitHub Search API supports up to 1000 results via pagination,
+    // but for a radar scan the top 100 by stars is sufficient.
     const response = await client.search.repos({
       q: query,
       sort: "stars",
@@ -60,7 +71,7 @@ export async function collectGitHub(
       candidates.push({
         url: repo.html_url,
         title: repo.full_name,
-        description: repo.description ?? "",
+        description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
         source: "github",
         metadata: {
           stars: repo.stargazers_count,
@@ -78,5 +89,4 @@ export async function collectGitHub(
   return candidates;
 }
 
-export { collectGitHub as collectAll };
 export { buildSearchQuery, createdAfterDate };

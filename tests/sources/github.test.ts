@@ -40,16 +40,24 @@ describe("createdAfterDate", () => {
     expected.setDate(expected.getDate() - 30);
     expect(result).toBe(expected.toISOString().split("T")[0]);
   });
+
+  it("handles 0d (today)", () => {
+    const result = createdAfterDate("0d");
+    expect(result).toBe(new Date().toISOString().split("T")[0]);
+  });
+
+  it("throws on invalid spec", () => {
+    expect(() => createdAfterDate("d")).toThrow("Invalid date spec");
+    expect(() => createdAfterDate("abc")).toThrow("Invalid date spec");
+  });
 });
 
 describe("buildSearchQuery", () => {
-  it("includes topics, languages, stars, and created date", () => {
-    const query = buildSearchQuery(baseConfig);
+  it("includes topics with OR semantics, languages, stars, and created date", () => {
+    const query = buildSearchQuery(baseConfig.sources.github!.topics, baseConfig);
 
-    expect(query).toContain("topic:webgpu");
-    expect(query).toContain("topic:gpu-crypto");
-    expect(query).toContain("language:rust");
-    expect(query).toContain("language:cuda");
+    expect(query).toContain("topic:webgpu topic:gpu-crypto");
+    expect(query).toContain("language:rust language:cuda");
     expect(query).toContain("stars:>=5");
     expect(query).toContain("created:>=");
   });
@@ -62,7 +70,7 @@ describe("buildSearchQuery", () => {
       },
     } as RadarConfig;
 
-    const query = buildSearchQuery(config);
+    const query = buildSearchQuery(config.sources.github!.topics, config);
     expect(query).not.toContain("stars:");
   });
 
@@ -78,7 +86,7 @@ describe("buildSearchQuery", () => {
       },
     } as RadarConfig;
 
-    const query = buildSearchQuery(config);
+    const query = buildSearchQuery(config.sources.github!.topics, config);
     expect(query).not.toContain("language:");
   });
 });
