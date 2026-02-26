@@ -1,0 +1,5 @@
+description: A minimal config with only GitHub source
+
+sources:
+  github:
+    topics: [typescript]
