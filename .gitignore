@@ -4,3 +4,6 @@ node_modules/
 coverage/
 .env
 *.local
+
+# dist/ is intentionally tracked for GitHub Actions runtime.
+# Do NOT add dist/ to .gitignore.

@@ -1,15 +1,15 @@
 import * as core from "@actions/core";
-import { loadConfig } from "./config.js";
-import { runPipeline } from "./pipeline.js";
-import { collectGitHub } from "./sources/github.js";
-import { collectArxiv } from "./sources/arxiv.js";
-import { collectBlogs } from "./sources/blogs.js";
-import { filterCandidates } from "./filter/keywords.js";
-import { dedup } from "./filter/dedup.js";
-import { classifyCandidates } from "./classifier/llm.js";
-import { createIssues } from "./output/issues.js";
-import type { RadarConfig } from "./config.js";
-import type { Candidate } from "./sources/types.js";
+import { loadConfig } from "./config";
+import { runPipeline } from "./pipeline";
+import { collectGitHub } from "./sources/github";
+import { collectArxiv } from "./sources/arxiv";
+import { collectBlogs } from "./sources/blogs";
+import { filterCandidates } from "./filter/keywords";
+import { dedup } from "./filter/dedup";
+import { classifyCandidates } from "./classifier/llm";
+import { createIssues } from "./output/issues";
+import type { RadarConfig } from "./config";
+import type { Candidate } from "./sources/types";
 
 async function collect(config: RadarConfig): Promise<Candidate[]> {
   const candidates: Candidate[] = [];

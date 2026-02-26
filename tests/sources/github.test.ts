@@ -3,8 +3,8 @@ import {
   collectGitHub,
   buildSearchQuery,
   createdAfterDate,
-} from "../../src/sources/github.js";
-import type { RadarConfig } from "../../src/config.js";
+} from "../../src/sources/github";
+import type { RadarConfig } from "../../src/config";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

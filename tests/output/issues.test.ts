@@ -5,9 +5,9 @@ import {
   buildIssueBody,
   escapeTableCell,
   type IssueClient,
-} from "../../src/output/issues.js";
-import type { RadarConfig } from "../../src/config.js";
-import type { ClassifiedCandidate } from "../../src/sources/types.js";
+} from "../../src/output/issues";
+import type { RadarConfig } from "../../src/config";
+import type { ClassifiedCandidate } from "../../src/sources/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

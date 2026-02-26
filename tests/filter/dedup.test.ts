@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { dedup, extractUrlsFromMarkdown } from "../../src/filter/dedup.js";
-import type { RadarConfig } from "../../src/config.js";
-import type { Candidate } from "../../src/sources/types.js";
+import { dedup, extractUrlsFromMarkdown } from "../../src/filter/dedup";
+import type { RadarConfig } from "../../src/config";
+import type { Candidate } from "../../src/sources/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

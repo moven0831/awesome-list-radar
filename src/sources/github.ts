@@ -1,7 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import * as core from "@actions/core";
-import type { RadarConfig } from "../config.js";
-import type { Candidate } from "./types.js";
+import type { RadarConfig } from "../config";
+import type { Candidate } from "./types";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 

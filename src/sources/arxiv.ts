@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { XMLParser } from "fast-xml-parser";
-import type { RadarConfig } from "../config.js";
-import type { Candidate } from "./types.js";
+import type { RadarConfig } from "../config";
+import type { Candidate } from "./types";
 
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;

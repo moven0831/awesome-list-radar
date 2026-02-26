@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
-import type { RadarConfig } from "../config.js";
-import type { Candidate, ClassifiedCandidate } from "../sources/types.js";
+import type { RadarConfig } from "../config";
+import type { Candidate, ClassifiedCandidate } from "../sources/types";
 
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
