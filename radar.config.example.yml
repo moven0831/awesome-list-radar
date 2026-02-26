@@ -1,33 +1,37 @@
-# Example radar config for awesome-client-side-gpu
+# Example radar config for an awesome list.
 # Copy this file as radar.config.yml and customize for your list.
 
 description: >
-  GPU-accelerated zero-knowledge cryptography for consumer devices —
-  WebGPU, Metal, CUDA implementations of MSM, NTT, and other
-  ZK proving primitives that run on consumer hardware.
+  A curated list of resources about your topic.
+  Describe what belongs in the list so the LLM can
+  score relevance accurately.
 
 list_file: README.md
 
 sources:
+  # Search GitHub for new repos by topic, language, stars, and recency.
   github:
-    topics: [webgpu, gpu-crypto, msm, ntt, zero-knowledge]
-    languages: [rust, cuda, metal, wgsl]
-    min_stars: 5
+    topics: [your-topic, related-topic]
+    languages: [python, typescript]
+    min_stars: 10
     created_after: "30d"
 
+  # Search arXiv for recent papers by category and keywords.
   arxiv:
-    categories: [cs.CR, cs.DC]
-    keywords: [GPU, MSM, NTT, zero-knowledge, proving]
+    categories: [cs.LG, cs.AI]
+    keywords: [your topic, related keyword]
 
+  # Monitor blog RSS feeds for new posts matching keywords.
   blogs:
     feeds:
       - https://blog.example.com/feed.xml
-    keywords: [gpu proving, client-side zk, webgpu crypto]
+      - https://another-blog.dev/rss
+    keywords: [your topic, related keyword]
 
 classification:
   model: claude-sonnet-4-6
-  threshold: 70
-  max_issues_per_run: 5
+  threshold: 70          # 0-100, only create issues for scores above this
+  max_issues_per_run: 5  # Caps the number of LLM API calls per run
 
 issue_template:
   labels: [radar, needs-review]

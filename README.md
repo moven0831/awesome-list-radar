@@ -21,23 +21,25 @@ Create `radar.config.yml` in your awesome list repo:
 
 ```yaml
 description: >
-  GPU-accelerated zero-knowledge cryptography for consumer devices
+  A curated list of machine learning tools and frameworks.
+  Describe what belongs in the list so the LLM can score
+  relevance accurately.
 
 list_file: README.md
 
 sources:
   github:
-    topics: [webgpu, gpu-crypto, msm, ntt, zero-knowledge]
-    languages: [rust, cuda, metal, wgsl]
-    min_stars: 5
+    topics: [machine-learning, deep-learning, neural-network]
+    languages: [python, typescript]
+    min_stars: 10
     created_after: "30d"
   arxiv:
-    categories: [cs.CR, cs.DC]
-    keywords: [GPU, MSM, NTT, zero-knowledge, proving]
+    categories: [cs.LG, cs.AI]
+    keywords: [machine learning, deep learning, transformer]
   blogs:
     feeds:
       - https://blog.example.com/feed.xml
-    keywords: [gpu proving, client-side zk]
+    keywords: [machine learning, deep learning]
 
 classification:
   model: claude-sonnet-4-6
@@ -124,28 +126,37 @@ Go to **Settings → Secrets and variables → Actions** and add `ANTHROPIC_API_
 
 Issues are created with a metadata table, description, LLM reasoning, and a suggested markdown entry:
 
-```
+````
 ## Candidate Resource
 
 | Field | Value |
 |-------|-------|
-| **URL** | https://github.com/example/gpu-msm |
+| **URL** | https://github.com/example/cool-ml-lib |
 | **Source** | github |
 | **Relevance Score** | 85/100 |
 | **Suggested Category** | Libraries |
-| **Tags** | `gpu`, `msm` |
-| **Stars** | 42 |
-| **Language** | Rust |
+| **Tags** | `deep-learning`, `transformer` |
+| **Stars** | 120 |
+| **Language** | Python |
 
 ## Description
-GPU-accelerated multi-scalar multiplication for ZK proofs
+
+```
+A lightweight library for building and training transformer models...
+```
 
 ## LLM Reasoning
-Directly relevant — implements MSM on consumer GPUs via WebGPU...
+
+```
+Directly relevant — provides a clean API for the core topic of the list...
+```
 
 ## Suggested Entry
-- [example/gpu-msm](https://github.com/example/gpu-msm) - GPU-accelerated multi-scalar multiplication
+
+```markdown
+- [example/cool-ml-lib](https://github.com/example/cool-ml-lib) - A lightweight library for building transformers
 ```
+````
 
 ## Development
 
