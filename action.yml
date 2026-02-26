@@ -1,0 +1,35 @@
+name: 'Awesome List Radar'
+description: 'Automatically discover relevant content for awesome lists and file issues for maintainer triage'
+author: 'awesome-list-radar'
+
+inputs:
+  config_path:
+    description: 'Path to radar.config.yml'
+    required: false
+    default: 'radar.config.yml'
+  github_token:
+    description: 'GitHub token for API access and issue creation'
+    required: true
+  anthropic_api_key:
+    description: 'Anthropic API key for LLM-based relevance scoring'
+    required: true
+  dry_run:
+    description: 'If true, log candidates without creating issues'
+    required: false
+    default: 'false'
+
+outputs:
+  issues_created:
+    description: 'Number of issues created in this run'
+  candidates_found:
+    description: 'Total number of candidates discovered'
+  candidates_filtered:
+    description: 'Number of candidates after filtering'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'radio'
+  color: 'purple'

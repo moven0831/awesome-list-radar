@@ -1,0 +1,35 @@
+{
+  "name": "awesome-list-radar",
+  "version": "0.1.0",
+  "description": "GitHub Action that discovers relevant content for awesome lists and files issues for maintainer triage",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "github-action",
+    "awesome-list",
+    "curation",
+    "radar"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@octokit/rest": "^21.1.0",
+    "fast-xml-parser": "^4.5.1",
+    "rss-parser": "^3.13.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
