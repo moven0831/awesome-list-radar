@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>ArXiv Query</title>
+  <entry>
+    <id>http://arxiv.org/abs/2401.12345v1</id>
+    <title>GPU-Accelerated Multi-Scalar Multiplication for
+      Zero-Knowledge Proofs</title>
+    <summary>We present a novel approach to MSM
+      using consumer GPUs via WebGPU, achieving
+      significant speedups over CPU implementations.</summary>
+    <author><name>Alice Smith</name></author>
+    <author><name>Bob Jones</name></author>
+    <published>2024-01-15T00:00:00Z</published>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.67890v1</id>
+    <title>NTT Optimization on Mobile GPUs</title>
+    <summary>This paper explores Number Theoretic Transform optimizations on mobile GPU architectures.</summary>
+    <author><name>Carol White</name></author>
+    <published>2024-01-14T00:00:00Z</published>
+  </entry>
+</feed>
