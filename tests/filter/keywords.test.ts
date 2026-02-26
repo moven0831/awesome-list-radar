@@ -3,9 +3,9 @@ import {
   filterCandidates,
   getAllKeywords,
   matchesAnyKeyword,
-} from "../../src/filter/keywords.js";
-import type { RadarConfig } from "../../src/config.js";
-import type { Candidate } from "../../src/sources/types.js";
+} from "../../src/filter/keywords";
+import type { RadarConfig } from "../../src/config";
+import type { Candidate } from "../../src/sources/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

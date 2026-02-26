@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import type { RadarConfig } from "./config.js";
-import type { Candidate, ClassifiedCandidate } from "./sources/types.js";
+import type { RadarConfig } from "./config";
+import type { Candidate, ClassifiedCandidate } from "./sources/types";
 
 export interface PipelineResult {
   candidatesFound: number;

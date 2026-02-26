@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { collectBlogs, matchesKeywords } from "../../src/sources/blogs.js";
-import type { RadarConfig } from "../../src/config.js";
+import { collectBlogs, matchesKeywords } from "../../src/sources/blogs";
+import type { RadarConfig } from "../../src/config";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

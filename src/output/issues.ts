@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import type { RadarConfig } from "../config.js";
-import type { ClassifiedCandidate } from "../sources/types.js";
+import type { RadarConfig } from "../config";
+import type { ClassifiedCandidate } from "../sources/types";
 
 function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { runPipeline, type PipelineDeps } from "../src/pipeline.js";
-import type { RadarConfig } from "../src/config.js";
-import type { Candidate, ClassifiedCandidate } from "../src/sources/types.js";
+import { runPipeline, type PipelineDeps } from "../src/pipeline";
+import type { RadarConfig } from "../src/config";
+import type { Candidate, ClassifiedCandidate } from "../src/sources/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

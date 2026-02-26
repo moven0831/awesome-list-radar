@@ -5,9 +5,9 @@ import {
   parseClassifyResponse,
   extractFirstJson,
   sanitize,
-} from "../../src/classifier/llm.js";
-import type { RadarConfig } from "../../src/config.js";
-import type { Candidate } from "../../src/sources/types.js";
+} from "../../src/classifier/llm";
+import type { RadarConfig } from "../../src/config";
+import type { Candidate } from "../../src/sources/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

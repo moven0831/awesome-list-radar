@@ -5,8 +5,8 @@ import {
   collectArxiv,
   buildArxivQuery,
   buildArxivUrl,
-} from "../../src/sources/arxiv.js";
-import type { RadarConfig } from "../../src/config.js";
+} from "../../src/sources/arxiv";
+import type { RadarConfig } from "../../src/config";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),

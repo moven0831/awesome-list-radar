@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as core from "@actions/core";
-import type { RadarConfig } from "../config.js";
-import type { Candidate } from "../sources/types.js";
+import type { RadarConfig } from "../config";
+import type { Candidate } from "../sources/types";
 
 const URL_REGEX = /https?:\/\/[^\s\)>\]]+/g;
 
