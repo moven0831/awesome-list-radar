@@ -1,0 +1,33 @@
+# Example radar config for awesome-client-side-gpu
+# Copy this file as radar.config.yml and customize for your list.
+
+description: >
+  GPU-accelerated zero-knowledge cryptography for consumer devices —
+  WebGPU, Metal, CUDA implementations of MSM, NTT, and other
+  ZK proving primitives that run on consumer hardware.
+
+list_file: README.md
+
+sources:
+  github:
+    topics: [webgpu, gpu-crypto, msm, ntt, zero-knowledge]
+    languages: [rust, cuda, metal, wgsl]
+    min_stars: 5
+    created_after: "30d"
+
+  arxiv:
+    categories: [cs.CR, cs.DC]
+    keywords: [GPU, MSM, NTT, zero-knowledge, proving]
+
+  blogs:
+    feeds:
+      - https://blog.example.com/feed.xml
+    keywords: [gpu proving, client-side zk, webgpu crypto]
+
+classification:
+  model: claude-sonnet-4-6
+  threshold: 70
+  max_issues_per_run: 5
+
+issue_template:
+  labels: [radar, needs-review]
