@@ -18,10 +18,12 @@ export function extractUrlsFromMarkdown(markdown: string): Set<string> {
   return urls;
 }
 
+type ReadFileFn = (path: string, encoding: BufferEncoding) => string;
+
 export function dedup(
   candidates: Candidate[],
   config: RadarConfig,
-  readFileFn: typeof readFileSync = readFileSync
+  readFileFn: ReadFileFn = readFileSync as ReadFileFn
 ): Candidate[] {
   let existingUrls: Set<string>;
 

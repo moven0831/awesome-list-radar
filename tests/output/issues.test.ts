@@ -3,6 +3,7 @@ import {
   createIssues,
   buildIssueTitle,
   buildIssueBody,
+  escapeTableCell,
   type IssueClient,
 } from "../../src/output/issues.js";
 import type { RadarConfig } from "../../src/config.js";
@@ -50,9 +51,24 @@ const mockClient = (): IssueClient & {
     .mockResolvedValue({ number: 1, html_url: "https://github.com/test/1" }),
 });
 
+describe("escapeTableCell", () => {
+  it("escapes pipe characters", () => {
+    expect(escapeTableCell("a|b|c")).toBe("a\\|b\\|c");
+  });
+
+  it("replaces newlines with spaces", () => {
+    expect(escapeTableCell("line1\nline2")).toBe("line1 line2");
+  });
+});
+
 describe("buildIssueTitle", () => {
   it("prefixes with [Radar]", () => {
     expect(buildIssueTitle(mockClassified)).toBe("[Radar] test/repo");
+  });
+
+  it("escapes pipe characters in title", () => {
+    const candidate = { ...mockClassified, title: "repo | with pipes" };
+    expect(buildIssueTitle(candidate)).toBe("[Radar] repo \\| with pipes");
   });
 });
 
@@ -72,6 +88,15 @@ describe("buildIssueBody", () => {
     expect(body).toContain("Suggested Entry");
   });
 
+  it("wraps description and reasoning in code blocks", () => {
+    const body = buildIssueBody(mockClassified);
+
+    // Check description is in code block
+    expect(body).toMatch(/```\nA great GPU library\n```/);
+    // Check reasoning is in code block
+    expect(body).toMatch(/```\nDirectly relevant to GPU-accelerated ZK\n```/);
+  });
+
   it("handles missing optional metadata", () => {
     const candidate: ClassifiedCandidate = {
       ...mockClassified,
@@ -83,6 +108,18 @@ describe("buildIssueBody", () => {
     expect(body).not.toContain("Stars");
     expect(body).not.toContain("Language");
     expect(body).not.toContain("Tags");
+  });
+
+  it("escapes pipe characters in table cells", () => {
+    const candidate: ClassifiedCandidate = {
+      ...mockClassified,
+      suggestedCategory: "Tools | Libraries",
+      metadata: { language: "C|C++" },
+    };
+
+    const body = buildIssueBody(candidate);
+    expect(body).toContain("Tools \\| Libraries");
+    expect(body).toContain("C\\|C++");
   });
 });
 
@@ -173,7 +210,6 @@ describe("createIssues", () => {
 
     const count = await createIssues([mockClassified], baseConfig, false, client);
 
-    // Should still create the issue since we can't dedup
     expect(count).toBe(1);
     expect(client.createIssue).toHaveBeenCalledTimes(1);
   });

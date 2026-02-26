@@ -3,6 +3,8 @@ import {
   classifyCandidates,
   buildUserPrompt,
   parseClassifyResponse,
+  extractFirstJson,
+  sanitize,
 } from "../../src/classifier/llm.js";
 import type { RadarConfig } from "../../src/config.js";
 import type { Candidate } from "../../src/sources/types.js";
@@ -34,6 +36,36 @@ const mockCandidate: Candidate = {
   source: "github",
   metadata: { stars: 42, language: "Rust", topics: ["webgpu", "msm"] },
 };
+
+describe("sanitize", () => {
+  it("truncates to max length", () => {
+    expect(sanitize("hello world", 5)).toBe("hello");
+  });
+
+  it("strips control characters", () => {
+    expect(sanitize("hello\x00world\x0B!", 100)).toBe("helloworld!");
+  });
+});
+
+describe("extractFirstJson", () => {
+  it("extracts first balanced JSON object", () => {
+    const text = 'Some text {"key": "value"} more text {"other": true}';
+    expect(extractFirstJson(text)).toBe('{"key": "value"}');
+  });
+
+  it("handles nested braces", () => {
+    const text = '{"outer": {"inner": 1}}';
+    expect(extractFirstJson(text)).toBe('{"outer": {"inner": 1}}');
+  });
+
+  it("throws when no JSON found", () => {
+    expect(() => extractFirstJson("no json")).toThrow("No JSON found");
+  });
+
+  it("throws on unbalanced braces", () => {
+    expect(() => extractFirstJson("{unclosed")).toThrow("No valid JSON found");
+  });
+});
 
 describe("parseClassifyResponse", () => {
   it("parses valid JSON response", () => {
@@ -90,15 +122,16 @@ describe("parseClassifyResponse", () => {
 });
 
 describe("buildUserPrompt", () => {
-  it("includes list description and candidate details", () => {
+  it("wraps candidate data in XML delimiters", () => {
     const prompt = buildUserPrompt(mockCandidate, baseConfig);
 
-    expect(prompt).toContain("GPU-accelerated zero-knowledge");
-    expect(prompt).toContain("test/gpu-msm");
-    expect(prompt).toContain("github.com/test/gpu-msm");
-    expect(prompt).toContain("42");
-    expect(prompt).toContain("Rust");
-    expect(prompt).toContain("webgpu");
+    expect(prompt).toContain("<candidate_title>test/gpu-msm</candidate_title>");
+    expect(prompt).toContain("<candidate_url>");
+    expect(prompt).toContain("<candidate_source>github</candidate_source>");
+    expect(prompt).toContain("<candidate_description>");
+    expect(prompt).toContain("<candidate_stars>42</candidate_stars>");
+    expect(prompt).toContain("<candidate_language>Rust</candidate_language>");
+    expect(prompt).toContain("<candidate_topics>webgpu, msm</candidate_topics>");
   });
 
   it("omits optional metadata when not present", () => {
@@ -111,9 +144,9 @@ describe("buildUserPrompt", () => {
     };
 
     const prompt = buildUserPrompt(candidate, baseConfig);
-    expect(prompt).not.toContain("Stars");
-    expect(prompt).not.toContain("Language");
-    expect(prompt).toContain("Alice");
+    expect(prompt).not.toContain("candidate_stars");
+    expect(prompt).not.toContain("candidate_language");
+    expect(prompt).toContain("<candidate_authors>Alice</candidate_authors>");
   });
 });
 
@@ -160,7 +193,7 @@ describe("classifyCandidates", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("respects max_issues_per_run limit", async () => {
+  it("respects max_issues_per_run limit on API calls", async () => {
     const config = {
       ...baseConfig,
       classification: { ...baseConfig.classification, max_issues_per_run: 2 },
@@ -201,7 +234,6 @@ describe("classifyCandidates", () => {
       client
     );
 
-    // First fails, second succeeds
     expect(result).toHaveLength(1);
     expect(result[0].relevanceScore).toBe(80);
   });

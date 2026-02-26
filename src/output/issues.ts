@@ -3,8 +3,12 @@ import * as github from "@actions/github";
 import type { RadarConfig } from "../config.js";
 import type { ClassifiedCandidate } from "../sources/types.js";
 
+function escapeTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
 function buildIssueTitle(candidate: ClassifiedCandidate): string {
-  return `[Radar] ${candidate.title}`;
+  return `[Radar] ${escapeTableCell(candidate.title).slice(0, 200)}`;
 }
 
 function buildIssueBody(candidate: ClassifiedCandidate): string {
@@ -13,15 +17,15 @@ function buildIssueBody(candidate: ClassifiedCandidate): string {
     ``,
     `| Field | Value |`,
     `|-------|-------|`,
-    `| **URL** | ${candidate.url} |`,
-    `| **Source** | ${candidate.source} |`,
+    `| **URL** | ${escapeTableCell(candidate.url)} |`,
+    `| **Source** | ${escapeTableCell(candidate.source)} |`,
     `| **Relevance Score** | ${candidate.relevanceScore}/100 |`,
-    `| **Suggested Category** | ${candidate.suggestedCategory} |`,
+    `| **Suggested Category** | ${escapeTableCell(candidate.suggestedCategory)} |`,
   ];
 
   if (candidate.suggestedTags.length > 0) {
     lines.push(
-      `| **Tags** | ${candidate.suggestedTags.map((t) => `\`${t}\``).join(", ")} |`
+      `| **Tags** | ${candidate.suggestedTags.map((t) => `\`${escapeTableCell(t)}\``).join(", ")} |`
     );
   }
 
@@ -30,12 +34,14 @@ function buildIssueBody(candidate: ClassifiedCandidate): string {
   }
 
   if (candidate.metadata.language) {
-    lines.push(`| **Language** | ${candidate.metadata.language} |`);
+    lines.push(
+      `| **Language** | ${escapeTableCell(candidate.metadata.language)} |`
+    );
   }
 
   if (candidate.metadata.authors?.length) {
     lines.push(
-      `| **Authors** | ${candidate.metadata.authors.join(", ")} |`
+      `| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |`
     );
   }
 
@@ -43,11 +49,15 @@ function buildIssueBody(candidate: ClassifiedCandidate): string {
     ``,
     `## Description`,
     ``,
-    candidate.description || "*No description available*",
+    "```",
+    (candidate.description || "No description available").slice(0, 1000),
+    "```",
     ``,
     `## LLM Reasoning`,
     ``,
-    candidate.reasoning || "*No reasoning provided*",
+    "```",
+    (candidate.reasoning || "No reasoning provided").slice(0, 500),
+    "```",
     ``,
     `## Suggested Entry`,
     ``,
@@ -77,6 +87,9 @@ function makeGitHubClient(token: string): IssueClient {
 
   return {
     async listIssues(labels: string[]) {
+      // Note: fetches up to 100 open issues. Repos with >100 open radar
+      // issues may see duplicate issue creation. Use GitHub search API
+      // for more robust dedup if this becomes an issue.
       const { data } = await octokit.rest.issues.listForRepo({
         owner,
         repo,
@@ -171,4 +184,4 @@ export async function createIssues(
   return created;
 }
 
-export { buildIssueTitle, buildIssueBody };
+export { buildIssueTitle, buildIssueBody, escapeTableCell };
