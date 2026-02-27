@@ -52,6 +52,22 @@ describe("getAllKeywords", () => {
     expect(kws.every((kw) => kw === kw.toLowerCase())).toBe(true);
   });
 
+  it("includes web_pages keywords", () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        ...baseConfig.sources,
+        web_pages: {
+          urls: ["https://example.com/blog"],
+          keywords: ["Metal GPU", "client-side"],
+        },
+      },
+    } as RadarConfig;
+    const kws = getAllKeywords(config);
+    expect(kws).toContain("metal gpu");
+    expect(kws).toContain("client-side");
+  });
+
   it("returns empty array when no sources configured", () => {
     const config = { ...baseConfig, sources: {} } as RadarConfig;
     expect(getAllKeywords(config)).toEqual([]);

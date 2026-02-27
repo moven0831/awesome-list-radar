@@ -22,10 +22,16 @@ const BlogsSourceSchema = z.object({
   keywords: z.array(z.string()).optional(),
 });
 
+const WebPagesSourceSchema = z.object({
+  urls: z.array(z.string().url()).min(1),
+  keywords: z.array(z.string()).optional(),
+});
+
 const SourcesSchema = z.object({
   github: GithubSourceSchema.optional(),
   arxiv: ArxivSourceSchema.optional(),
   blogs: BlogsSourceSchema.optional(),
+  web_pages: WebPagesSourceSchema.optional(),
 });
 
 const ClassificationSchema = z.object({
@@ -42,7 +48,7 @@ export const RadarConfigSchema = z.object({
   description: z.string().min(1),
   list_file: z.string().default("README.md"),
   sources: SourcesSchema.refine(
-    (s) => s.github || s.arxiv || s.blogs,
+    (s) => s.github || s.arxiv || s.blogs || s.web_pages,
     "At least one source must be configured"
   ),
   classification: ClassificationSchema.default({}),

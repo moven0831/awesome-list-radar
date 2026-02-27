@@ -4,6 +4,7 @@ import { runPipeline } from "./pipeline";
 import { collectGitHub } from "./sources/github";
 import { collectArxiv } from "./sources/arxiv";
 import { collectBlogs } from "./sources/blogs";
+import { collectWebPages } from "./sources/web_pages";
 import { filterCandidates } from "./filter/keywords";
 import { dedup } from "./filter/dedup";
 import { classifyCandidates } from "./classifier/llm";
@@ -22,6 +23,9 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
   }
   if (config.sources.blogs) {
     candidates.push(...(await collectBlogs(config)));
+  }
+  if (config.sources.web_pages) {
+    candidates.push(...(await collectWebPages(config)));
   }
 
   return candidates;

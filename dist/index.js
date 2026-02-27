@@ -45977,10 +45977,15 @@ const BlogsSourceSchema = zod_1.z.object({
     feeds: zod_1.z.array(zod_1.z.string().url()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).optional(),
 });
+const WebPagesSourceSchema = zod_1.z.object({
+    urls: zod_1.z.array(zod_1.z.string().url()).min(1),
+    keywords: zod_1.z.array(zod_1.z.string()).optional(),
+});
 const SourcesSchema = zod_1.z.object({
     github: GithubSourceSchema.optional(),
     arxiv: ArxivSourceSchema.optional(),
     blogs: BlogsSourceSchema.optional(),
+    web_pages: WebPagesSourceSchema.optional(),
 });
 const ClassificationSchema = zod_1.z.object({
     model: zod_1.z.string().default("claude-sonnet-4-6"),
@@ -45993,7 +45998,7 @@ const IssueTemplateSchema = zod_1.z.object({
 exports.RadarConfigSchema = zod_1.z.object({
     description: zod_1.z.string().min(1),
     list_file: zod_1.z.string().default("README.md"),
-    sources: SourcesSchema.refine((s) => s.github || s.arxiv || s.blogs, "At least one source must be configured"),
+    sources: SourcesSchema.refine((s) => s.github || s.arxiv || s.blogs || s.web_pages, "At least one source must be configured"),
     classification: ClassificationSchema.default({}),
     issue_template: IssueTemplateSchema.default({}),
 });
@@ -46137,6 +46142,9 @@ function getAllKeywords(config) {
     if (config.sources.blogs?.keywords) {
         keywords.push(...config.sources.blogs.keywords);
     }
+    if (config.sources.web_pages?.keywords) {
+        keywords.push(...config.sources.web_pages.keywords);
+    }
     return [...new Set(keywords.map((kw) => kw.toLowerCase()))];
 }
 function matchesAnyKeyword(text, keywords) {
@@ -46205,6 +46213,7 @@ const pipeline_1 = __nccwpck_require__(5165);
 const github_1 = __nccwpck_require__(15);
 const arxiv_1 = __nccwpck_require__(5012);
 const blogs_1 = __nccwpck_require__(4731);
+const web_pages_1 = __nccwpck_require__(8555);
 const keywords_1 = __nccwpck_require__(9216);
 const dedup_1 = __nccwpck_require__(6962);
 const llm_1 = __nccwpck_require__(5178);
@@ -46219,6 +46228,9 @@ async function collect(config) {
     }
     if (config.sources.blogs) {
         candidates.push(...(await (0, blogs_1.collectBlogs)(config)));
+    }
+    if (config.sources.web_pages) {
+        candidates.push(...(await (0, web_pages_1.collectWebPages)(config)));
     }
     return candidates;
 }
@@ -46793,6 +46805,182 @@ async function collectGitHub(config, octokit) {
     }
     catch (error) {
         core.warning(`GitHub search failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return candidates;
+}
+
+
+/***/ }),
+
+/***/ 8555:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.cleanHtml = cleanHtml;
+exports.extractFirstJsonArray = extractFirstJsonArray;
+exports.resolveUrl = resolveUrl;
+exports.collectWebPages = collectWebPages;
+const sdk_1 = __importDefault(__nccwpck_require__(121));
+const core = __importStar(__nccwpck_require__(7484));
+const blogs_1 = __nccwpck_require__(4731);
+const MAX_DESCRIPTION_LENGTH = 1000;
+const MAX_HTML_LENGTH = 15_000;
+const SYSTEM_PROMPT = `You are an article link extractor. Given the cleaned text of a web page, extract all article or blog post links you can find.
+
+Respond with ONLY a valid JSON array of objects, each with "title" and "url" fields:
+[{"title": "Article Title", "url": "https://example.com/article"}]
+
+If no article links are found, respond with an empty array: []`;
+function cleanHtml(html) {
+    let text = html;
+    // Remove script, style, nav, footer, header tags and their content
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
+    text = text.replace(/<nav[\s\S]*?<\/nav>/gi, "");
+    text = text.replace(/<footer[\s\S]*?<\/footer>/gi, "");
+    text = text.replace(/<header[\s\S]*?<\/header>/gi, "");
+    // Convert <a href="url">text</a> to [text](url)
+    text = text.replace(/<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, url, linkText) => {
+        const clean = linkText.replace(/<[^>]+>/g, "").trim();
+        return clean ? `[${clean}](${url})` : "";
+    });
+    // Strip remaining HTML tags
+    text = text.replace(/<[^>]+>/g, " ");
+    // Normalize whitespace
+    text = text.replace(/\s+/g, " ").trim();
+    return text.slice(0, MAX_HTML_LENGTH);
+}
+function extractFirstJsonArray(text) {
+    const start = text.indexOf("[");
+    if (start === -1)
+        return [];
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+        if (text[i] === "[")
+            depth++;
+        if (text[i] === "]")
+            depth--;
+        if (depth === 0) {
+            const parsed = JSON.parse(text.slice(start, i + 1));
+            if (!Array.isArray(parsed))
+                return [];
+            return parsed.filter((item) => typeof item === "object" &&
+                item !== null &&
+                "title" in item &&
+                "url" in item &&
+                typeof item.title === "string" &&
+                typeof item.url === "string");
+        }
+    }
+    return [];
+}
+function resolveUrl(base, href) {
+    try {
+        return new URL(href, base).href;
+    }
+    catch {
+        return href;
+    }
+}
+async function collectWebPages(config, fetchFn, client) {
+    if (!config.sources.web_pages)
+        return [];
+    const webPages = config.sources.web_pages;
+    const fetcher = fetchFn ?? fetch;
+    const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
+    const results = await Promise.allSettled(webPages.urls.map(async (pageUrl) => {
+        core.info(`Fetching web page: ${pageUrl}`);
+        const response = await fetcher(pageUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} for ${pageUrl}`);
+        }
+        const html = await response.text();
+        const cleaned = cleanHtml(html);
+        core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
+        const message = await anthropic.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 4096,
+            system: SYSTEM_PROMPT,
+            messages: [
+                {
+                    role: "user",
+                    content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
+                },
+            ],
+        });
+        const text = message.content[0].type === "text" ? message.content[0].text : "[]";
+        const links = extractFirstJsonArray(text);
+        // Resolve relative URLs
+        const resolved = links.map((link) => ({
+            ...link,
+            url: resolveUrl(pageUrl, link.url),
+        }));
+        return { pageUrl, links: resolved };
+    }));
+    const candidates = [];
+    for (const result of results) {
+        if (result.status === "rejected") {
+            core.warning(`Failed to process web page: ${result.reason}`);
+            continue;
+        }
+        const { pageUrl, links } = result.value;
+        for (const link of links) {
+            if (!link.url || !link.title)
+                continue;
+            const text = `${link.title} ${link.url}`;
+            // Optional keyword filtering
+            if (webPages.keywords && webPages.keywords.length > 0) {
+                if (!(0, blogs_1.matchesKeywords)(text, webPages.keywords))
+                    continue;
+            }
+            candidates.push({
+                url: link.url,
+                title: link.title,
+                description: link.title.slice(0, MAX_DESCRIPTION_LENGTH),
+                source: "web_page",
+                metadata: {
+                    pageName: new URL(pageUrl).hostname,
+                },
+            });
+        }
     }
     return candidates;
 }

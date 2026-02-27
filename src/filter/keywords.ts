@@ -14,6 +14,9 @@ function getAllKeywords(config: RadarConfig): string[] {
   if (config.sources.blogs?.keywords) {
     keywords.push(...config.sources.blogs.keywords);
   }
+  if (config.sources.web_pages?.keywords) {
+    keywords.push(...config.sources.web_pages.keywords);
+  }
 
   return [...new Set(keywords.map((kw) => kw.toLowerCase()))];
 }

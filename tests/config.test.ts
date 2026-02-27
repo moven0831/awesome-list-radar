@@ -86,4 +86,42 @@ classification:
 `)
     ).toThrow();
   });
+
+  it("parses web_pages source config", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    keywords:
+      - gpu
+      - webgpu
+`);
+    expect(config.sources.web_pages?.urls).toEqual(["https://example.com/blog"]);
+    expect(config.sources.web_pages?.keywords).toEqual(["gpu", "webgpu"]);
+  });
+
+  it("rejects invalid web_pages URLs", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - not-a-url
+`)
+    ).toThrow();
+  });
+
+  it("accepts web_pages as sole source", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+`);
+    expect(config.sources.web_pages?.urls).toHaveLength(1);
+  });
 });

@@ -2,7 +2,7 @@ export interface Candidate {
   url: string;
   title: string;
   description: string;
-  source: "github" | "arxiv" | "blog";
+  source: "github" | "arxiv" | "blog" | "web_page";
   metadata: CandidateMetadata;
 }
 
@@ -13,6 +13,7 @@ export interface CandidateMetadata {
   authors?: string[];
   publishedAt?: string;
   feedName?: string;
+  pageName?: string;
 }
 
 export interface ClassifiedCandidate extends Candidate {
