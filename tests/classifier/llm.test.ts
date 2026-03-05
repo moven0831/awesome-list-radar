@@ -5,6 +5,8 @@ import {
   parseClassifyResponse,
   extractFirstJson,
   sanitize,
+  loadCategoryTree,
+  SYSTEM_PROMPT,
 } from "../../src/classifier/llm";
 import type { RadarConfig } from "../../src/config";
 import type { Candidate } from "../../src/sources/types";
@@ -25,6 +27,7 @@ const baseConfig = {
     model: "claude-sonnet-4-6",
     threshold: 70,
     max_issues_per_run: 5,
+    max_description_length: 500,
   },
   issue_template: { labels: ["radar"] },
 } as RadarConfig;
@@ -134,6 +137,61 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("<candidate_topics>webgpu, msm</candidate_topics>");
   });
 
+  it("includes categories when configured", () => {
+    const config = {
+      ...baseConfig,
+      classification: {
+        ...baseConfig.classification,
+        categories: ["Libraries", "Tools", "Resources"],
+      },
+    } as RadarConfig;
+
+    const categoryTree = loadCategoryTree(config);
+    const prompt = buildUserPrompt(mockCandidate, config, categoryTree);
+    expect(prompt).toContain("## Available Categories");
+    expect(prompt).toContain("- Libraries");
+    expect(prompt).toContain("- Tools");
+    expect(prompt).toContain("- Resources");
+    expect(prompt).toContain(
+      "Pick the most appropriate category from the list above."
+    );
+  });
+
+  it("applies max_description_length truncation", () => {
+    const longDesc = "a".repeat(1000);
+    const candidate: Candidate = {
+      ...mockCandidate,
+      description: longDesc,
+    };
+    const config = {
+      ...baseConfig,
+      classification: {
+        ...baseConfig.classification,
+        max_description_length: 100,
+      },
+    } as RadarConfig;
+
+    const prompt = buildUserPrompt(candidate, config);
+    // The description in the prompt should be truncated to 100 chars
+    expect(prompt).toContain("a".repeat(100));
+    expect(prompt).not.toContain("a".repeat(101));
+  });
+
+  it("includes context when configured", () => {
+    const config = {
+      ...baseConfig,
+      classification: {
+        ...baseConfig.classification,
+        context: "Focus on WebGPU compute shader projects only.",
+      },
+    } as RadarConfig;
+
+    const prompt = buildUserPrompt(mockCandidate, config);
+    expect(prompt).toContain(
+      "Focus on WebGPU compute shader projects only."
+    );
+  });
+
   it("omits optional metadata when not present", () => {
     const candidate: Candidate = {
       url: "https://arxiv.org/abs/123",
@@ -241,5 +299,60 @@ describe("classifyCandidates", () => {
   it("returns empty array for empty candidates", async () => {
     const result = await classifyCandidates([], baseConfig);
     expect(result).toEqual([]);
+  });
+
+  it("uses custom system_prompt when configured", async () => {
+    const customPrompt = "You are a custom classifier.";
+    const config = {
+      ...baseConfig,
+      classification: {
+        ...baseConfig.classification,
+        system_prompt: customPrompt,
+      },
+    } as RadarConfig;
+
+    const client = {
+      messages: {
+        create: vi.fn().mockResolvedValueOnce({
+          content: [
+            {
+              type: "text",
+              text: '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
+            },
+          ],
+        }),
+      },
+    } as any;
+
+    await classifyCandidates([mockCandidate], config, client);
+
+    expect(client.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: customPrompt,
+      })
+    );
+  });
+
+  it("uses default SYSTEM_PROMPT when no custom prompt configured", async () => {
+    const client = {
+      messages: {
+        create: vi.fn().mockResolvedValueOnce({
+          content: [
+            {
+              type: "text",
+              text: '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
+            },
+          ],
+        }),
+      },
+    } as any;
+
+    await classifyCandidates([mockCandidate], baseConfig, client);
+
+    expect(client.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: SYSTEM_PROMPT,
+      })
+    );
   });
 });

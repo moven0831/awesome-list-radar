@@ -38,6 +38,10 @@ const ClassificationSchema = z.object({
   model: z.string().default("claude-sonnet-4-6"),
   threshold: z.number().min(0).max(100).default(70),
   max_issues_per_run: z.number().int().positive().default(5),
+  system_prompt: z.string().optional(),
+  context: z.string().optional(),
+  max_description_length: z.number().int().positive().default(500),
+  categories: z.array(z.string()).optional(),
 });
 
 const IssueTemplateSchema = z.object({
