@@ -39,6 +39,14 @@ function buildSearchQuery(
   const after = createdAfterDate(gh.created_after);
   parts.push(`created:>=${after}`);
 
+  if (gh.exclude_forks) {
+    parts.push("fork:false");
+  }
+
+  if (gh.exclude_archived) {
+    parts.push("archived:false");
+  }
+
   return parts.join(" ");
 }
 
@@ -57,28 +65,40 @@ export async function collectGitHub(
   const candidates: Candidate[] = [];
 
   try {
-    // Note: fetches a single page (100 results) sorted by stars.
-    // GitHub Search API supports up to 1000 results via pagination,
-    // but for a radar scan the top 100 by stars is sufficient.
-    const response = await client.search.repos({
-      q: query,
-      sort: "stars",
-      order: "desc",
-      per_page: 100,
-    });
+    const gh = config.sources.github;
+    const maxResults = gh.max_results;
+    const perPage = Math.min(maxResults, 100);
+    let page = 1;
+    let fetched = 0;
 
-    for (const repo of response.data.items) {
-      candidates.push({
-        url: repo.html_url,
-        title: repo.full_name,
-        description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
-        source: "github",
-        metadata: {
-          stars: repo.stargazers_count,
-          language: repo.language ?? undefined,
-          topics: repo.topics ?? [],
-        },
+    while (fetched < maxResults) {
+      const response = await client.search.repos({
+        q: query,
+        sort: gh.sort === "best-match" ? undefined : gh.sort,
+        order: "desc",
+        per_page: perPage,
+        page,
       });
+
+      for (const repo of response.data.items) {
+        if (fetched >= maxResults) break;
+        candidates.push({
+          url: repo.html_url,
+          title: repo.full_name,
+          description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
+          source: "github",
+          metadata: {
+            stars: repo.stargazers_count,
+            language: repo.language ?? undefined,
+            topics: repo.topics ?? [],
+          },
+        });
+        fetched++;
+      }
+
+      // No more results
+      if (response.data.items.length < perPage) break;
+      page++;
     }
   } catch (error) {
     core.warning(
