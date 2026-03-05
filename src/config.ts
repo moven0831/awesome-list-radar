@@ -47,6 +47,7 @@ const IssueTemplateSchema = z.object({
 export const RadarConfigSchema = z.object({
   description: z.string().min(1),
   list_file: z.string().default("README.md"),
+  state_file: z.string().default(".radar-state.json"),
   sources: SourcesSchema.refine(
     (s) => s.github || s.arxiv || s.blogs || s.web_pages,
     "At least one source must be configured"

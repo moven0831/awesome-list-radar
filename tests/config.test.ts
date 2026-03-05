@@ -114,6 +114,22 @@ sources:
     ).toThrow();
   });
 
+  it("defaults state_file to .radar-state.json", () => {
+    const config = parseConfig(fixture("minimal-config.yml"));
+    expect(config.state_file).toBe(".radar-state.json");
+  });
+
+  it("allows custom state_file path", () => {
+    const config = parseConfig(`
+description: test
+state_file: custom-state.json
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.state_file).toBe("custom-state.json");
+  });
+
   it("accepts web_pages as sole source", () => {
     const config = parseConfig(`
 description: test

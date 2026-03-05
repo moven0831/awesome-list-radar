@@ -9,6 +9,12 @@ import { filterCandidates } from "./filter/keywords";
 import { dedup } from "./filter/dedup";
 import { classifyCandidates } from "./classifier/llm";
 import { createIssues } from "./output/issues";
+import {
+  loadState,
+  saveState,
+  filterSeenCandidates,
+  recordCandidates,
+} from "./state";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
@@ -31,14 +37,6 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
   return candidates;
 }
 
-async function filter(
-  candidates: Candidate[],
-  config: RadarConfig
-): Promise<Candidate[]> {
-  const keywordFiltered = filterCandidates(candidates, config);
-  return dedup(keywordFiltered, config);
-}
-
 async function run(): Promise<void> {
   try {
     const configPath = core.getInput("config_path");
@@ -47,16 +45,48 @@ async function run(): Promise<void> {
     core.info(`Loading config from ${configPath}`);
     const config = loadConfig(configPath);
 
+    // Load state
+    const state = loadState(config.state_file);
+
     const result = await runPipeline(
       config,
       {
         collect,
-        filter,
-        classify: classifyCandidates,
+        filter: async (candidates, cfg) => {
+          // First filter out already-seen candidates
+          const unseen = filterSeenCandidates(candidates, state);
+          // Then apply keyword filtering and dedup
+          const keywordFiltered = filterCandidates(unseen, cfg);
+          const metadataResult = dedup(keywordFiltered, cfg);
+
+          // Record candidates that were filtered out
+          const filteredOut = unseen.filter(
+            (c) => !metadataResult.includes(c)
+          );
+          recordCandidates(state, filteredOut, "filtered");
+
+          return metadataResult;
+        },
+        classify: async (candidates, cfg) => {
+          const classified = await classifyCandidates(candidates, cfg);
+
+          // Record accepted (classified) and rejected (below threshold) candidates
+          const classifiedUrls = new Set(classified.map((c) => c.url));
+          const rejected = candidates.filter(
+            (c) => !classifiedUrls.has(c.url)
+          );
+          recordCandidates(state, classified, "accepted");
+          recordCandidates(state, rejected, "rejected");
+
+          return classified;
+        },
         output: createIssues,
       },
       dryRun
     );
+
+    // Save state
+    saveState(config.state_file, state);
 
     core.setOutput("candidates_found", result.candidatesFound);
     core.setOutput("candidates_filtered", result.candidatesFiltered);
