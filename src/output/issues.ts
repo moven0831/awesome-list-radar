@@ -75,9 +75,9 @@ function buildIssueBody(candidate: ClassifiedCandidate): string {
     );
   }
 
-  if (candidate.metadata.lastCommitAt) {
+  if (candidate.metadata.lastPushedAt) {
     lines.push(
-      `| **Last Commit** | ${escapeTableCell(candidate.metadata.lastCommitAt)} |`
+      `| **Last Pushed** | ${escapeTableCell(candidate.metadata.lastPushedAt)} |`
     );
   }
 

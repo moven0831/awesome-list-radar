@@ -170,7 +170,7 @@ describe("buildUserPrompt", () => {
         fork: true,
         owner: "testorg",
         homepage: "https://example.com",
-        lastCommitAt: "2025-01-15T00:00:00Z",
+        lastPushedAt: "2025-01-15T00:00:00Z",
       },
     };
 
@@ -180,7 +180,7 @@ describe("buildUserPrompt", () => {
     expect(prompt).toContain("<candidate_fork>true</candidate_fork>");
     expect(prompt).toContain("<candidate_owner>testorg</candidate_owner>");
     expect(prompt).toContain("<candidate_homepage>https://example.com</candidate_homepage>");
-    expect(prompt).toContain("<candidate_last_commit>2025-01-15T00:00:00Z</candidate_last_commit>");
+    expect(prompt).toContain("<candidate_last_pushed>2025-01-15T00:00:00Z</candidate_last_pushed>");
   });
 });
 

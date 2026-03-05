@@ -19,7 +19,7 @@ export interface CandidateMetadata {
   fork?: boolean;
   owner?: string;
   homepage?: string;
-  lastCommitAt?: string;
+  lastPushedAt?: string;
 }
 
 export interface ClassifiedCandidate extends Candidate {

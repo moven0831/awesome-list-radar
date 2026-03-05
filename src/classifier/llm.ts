@@ -78,9 +78,9 @@ function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
       `<candidate_homepage>${sanitize(candidate.metadata.homepage, 500)}</candidate_homepage>`
     );
   }
-  if (candidate.metadata.lastCommitAt) {
+  if (candidate.metadata.lastPushedAt) {
     parts.push(
-      `<candidate_last_commit>${sanitize(candidate.metadata.lastCommitAt, 50)}</candidate_last_commit>`
+      `<candidate_last_pushed>${sanitize(candidate.metadata.lastPushedAt, 50)}</candidate_last_pushed>`
     );
   }
 

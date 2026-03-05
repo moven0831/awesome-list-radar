@@ -77,12 +77,12 @@ export async function collectGitHub(
           stars: repo.stargazers_count,
           language: repo.language ?? undefined,
           topics: repo.topics ?? [],
-          license: repo.license?.spdx_id ?? undefined,
+          license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
           archived: repo.archived ?? undefined,
           fork: repo.fork ?? undefined,
           owner: repo.owner?.login ?? undefined,
           homepage: repo.homepage || undefined,
-          lastCommitAt: repo.pushed_at ?? undefined,
+          lastPushedAt: repo.pushed_at ?? undefined,
         },
       });
     }

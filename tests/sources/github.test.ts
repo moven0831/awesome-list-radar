@@ -149,7 +149,7 @@ describe("collectGitHub", () => {
         fork: false,
         owner: "test",
         homepage: "https://example.com",
-        lastCommitAt: "2025-01-15T00:00:00Z",
+        lastPushedAt: "2025-01-15T00:00:00Z",
       },
     });
     expect(candidates[1].description).toBe("");
@@ -158,6 +158,8 @@ describe("collectGitHub", () => {
     expect(candidates[1].metadata.homepage).toBeUndefined();
     expect(candidates[1].metadata.fork).toBe(true);
     expect(candidates[1].metadata.owner).toBe("test");
+    expect(candidates[1].metadata.archived).toBe(false);
+    expect(candidates[1].metadata.lastPushedAt).toBe("2025-01-10T00:00:00Z");
   });
 
   it("returns empty array when github source is not configured", async () => {

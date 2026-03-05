@@ -122,7 +122,7 @@ describe("buildIssueBody", () => {
         fork: true,
         owner: "testorg",
         homepage: "https://example.com",
-        lastCommitAt: "2025-01-15T00:00:00Z",
+        lastPushedAt: "2025-01-15T00:00:00Z",
       },
     };
 
@@ -132,7 +132,7 @@ describe("buildIssueBody", () => {
     expect(body).toContain("| **Fork** | Yes |");
     expect(body).toContain("| **Owner** | testorg |");
     expect(body).toContain("| **Homepage** | https://example.com |");
-    expect(body).toContain("| **Last Commit** | 2025-01-15T00:00:00Z |");
+    expect(body).toContain("| **Last Pushed** | 2025-01-15T00:00:00Z |");
   });
 
   it("escapes pipe characters in table cells", () => {
