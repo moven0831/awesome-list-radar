@@ -124,4 +124,62 @@ sources:
 `);
     expect(config.sources.web_pages?.urls).toHaveLength(1);
   });
+
+  it("parses registries source config", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  registries:
+    - type: npm
+      keywords: [webgpu, wasm]
+      min_downloads: 100
+      max_results: 20
+    - type: pypi
+      keywords: [torch]
+    - type: crates
+      keywords: [wgpu]
+`);
+    expect(config.sources.registries).toHaveLength(3);
+    expect(config.sources.registries![0].type).toBe("npm");
+    expect(config.sources.registries![0].keywords).toEqual(["webgpu", "wasm"]);
+    expect(config.sources.registries![0].min_downloads).toBe(100);
+    expect(config.sources.registries![0].max_results).toBe(20);
+    expect(config.sources.registries![1].min_downloads).toBe(0);
+    expect(config.sources.registries![1].max_results).toBe(50);
+  });
+
+  it("accepts registries as sole source", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  registries:
+    - type: npm
+      keywords: [react]
+`);
+    expect(config.sources.registries).toHaveLength(1);
+  });
+
+  it("rejects invalid registry type", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  registries:
+    - type: maven
+      keywords: [spring]
+`)
+    ).toThrow();
+  });
+
+  it("rejects registry entry with empty keywords", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  registries:
+    - type: npm
+      keywords: []
+`)
+    ).toThrow();
+  });
 });

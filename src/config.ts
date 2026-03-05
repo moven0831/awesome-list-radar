@@ -27,11 +27,21 @@ const WebPagesSourceSchema = z.object({
   keywords: z.array(z.string()).optional(),
 });
 
+const RegistryEntrySchema = z.object({
+  type: z.enum(["npm", "pypi", "crates"]),
+  keywords: z.array(z.string()).min(1),
+  min_downloads: z.number().int().nonnegative().default(0),
+  max_results: z.number().int().min(1).max(250).default(50),
+});
+
+const RegistrySourceSchema = z.array(RegistryEntrySchema).min(1);
+
 const SourcesSchema = z.object({
   github: GithubSourceSchema.optional(),
   arxiv: ArxivSourceSchema.optional(),
   blogs: BlogsSourceSchema.optional(),
   web_pages: WebPagesSourceSchema.optional(),
+  registries: RegistrySourceSchema.optional(),
 });
 
 const ClassificationSchema = z.object({
@@ -48,7 +58,7 @@ export const RadarConfigSchema = z.object({
   description: z.string().min(1),
   list_file: z.string().default("README.md"),
   sources: SourcesSchema.refine(
-    (s) => s.github || s.arxiv || s.blogs || s.web_pages,
+    (s) => s.github || s.arxiv || s.blogs || s.web_pages || s.registries,
     "At least one source must be configured"
   ),
   classification: ClassificationSchema.default({}),

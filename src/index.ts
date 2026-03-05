@@ -5,6 +5,7 @@ import { collectGitHub } from "./sources/github";
 import { collectArxiv } from "./sources/arxiv";
 import { collectBlogs } from "./sources/blogs";
 import { collectWebPages } from "./sources/web_pages";
+import { collectRegistries } from "./sources/registry";
 import { filterCandidates } from "./filter/keywords";
 import { dedup } from "./filter/dedup";
 import { classifyCandidates } from "./classifier/llm";
@@ -26,6 +27,9 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
   }
   if (config.sources.web_pages) {
     candidates.push(...(await collectWebPages(config)));
+  }
+  if (config.sources.registries) {
+    candidates.push(...(await collectRegistries(config)));
   }
 
   return candidates;
