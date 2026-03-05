@@ -24,7 +24,7 @@ const baseConfig = {
   classification: {
     model: "claude-sonnet-4-6",
     threshold: 70,
-    max_issues_per_run: 5,
+    max_classifications_per_run: 5,
   },
   issue_template: { labels: ["radar", "needs-review"] },
 } as RadarConfig;

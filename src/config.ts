@@ -37,8 +37,13 @@ const SourcesSchema = z.object({
 const ClassificationSchema = z.object({
   model: z.string().default("claude-sonnet-4-6"),
   threshold: z.number().min(0).max(100).default(70),
-  max_issues_per_run: z.number().int().positive().default(5),
-});
+  max_classifications_per_run: z.number().int().positive().optional(),
+  max_issues_per_run: z.number().int().positive().optional(), // deprecated alias
+  max_budget_usd: z.number().positive().optional(),
+}).transform((val) => ({
+  ...val,
+  max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
+}));
 
 const IssueTemplateSchema = z.object({
   labels: z.array(z.string()).default(["radar", "needs-review"]),

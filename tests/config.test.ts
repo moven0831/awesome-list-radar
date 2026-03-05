@@ -20,7 +20,7 @@ describe("parseConfig", () => {
     expect(config.sources.blogs?.feeds).toHaveLength(1);
     expect(config.classification.model).toBe("claude-sonnet-4-6");
     expect(config.classification.threshold).toBe(70);
-    expect(config.classification.max_issues_per_run).toBe(5);
+    expect(config.classification.max_classifications_per_run).toBe(5);
     expect(config.issue_template.labels).toEqual(["radar", "needs-review"]);
   });
 
@@ -32,7 +32,7 @@ describe("parseConfig", () => {
     expect(config.sources.github?.min_stars).toBe(0);
     expect(config.sources.github?.created_after).toBe("30d");
     expect(config.classification.threshold).toBe(70);
-    expect(config.classification.max_issues_per_run).toBe(5);
+    expect(config.classification.max_classifications_per_run).toBe(5);
     expect(config.issue_template.labels).toEqual(["radar", "needs-review"]);
   });
 
@@ -123,5 +123,74 @@ sources:
       - https://example.com/blog
 `);
     expect(config.sources.web_pages?.urls).toHaveLength(1);
+  });
+
+  it("supports max_classifications_per_run replacing max_issues_per_run", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_classifications_per_run: 10
+`);
+    expect(config.classification.max_classifications_per_run).toBe(10);
+  });
+
+  it("supports max_issues_per_run as deprecated alias", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_issues_per_run: 8
+`);
+    expect(config.classification.max_classifications_per_run).toBe(8);
+  });
+
+  it("prefers max_classifications_per_run over max_issues_per_run", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_classifications_per_run: 10
+  max_issues_per_run: 8
+`);
+    expect(config.classification.max_classifications_per_run).toBe(10);
+  });
+
+  it("defaults max_classifications_per_run to 5 when neither is set", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.max_classifications_per_run).toBe(5);
+  });
+
+  it("accepts optional max_budget_usd", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_budget_usd: 0.50
+`);
+    expect(config.classification.max_budget_usd).toBe(0.5);
+  });
+
+  it("allows max_budget_usd to be omitted", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.max_budget_usd).toBeUndefined();
   });
 });
