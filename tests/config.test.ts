@@ -124,4 +124,34 @@ sources:
 `);
     expect(config.sources.web_pages?.urls).toHaveLength(1);
   });
+
+  it("applies defaults for issue_template new fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.issue_template.title_prefix).toBe("[Radar]");
+    expect(config.issue_template.include_fields).toBeUndefined();
+    expect(config.issue_template.suggested_entry_format).toBeUndefined();
+  });
+
+  it("parses custom issue_template fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+issue_template:
+  title_prefix: "[New]"
+  include_fields:
+    - url
+    - stars
+  suggested_entry_format: "- [{{name}}]({{url}})"
+`);
+    expect(config.issue_template.title_prefix).toBe("[New]");
+    expect(config.issue_template.include_fields).toEqual(["url", "stars"]);
+    expect(config.issue_template.suggested_entry_format).toBe("- [{{name}}]({{url}})");
+  });
 });
