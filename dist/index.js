@@ -45974,7 +45974,17 @@ const ArxivSourceSchema = zod_1.z.object({
     keywords: zod_1.z.array(zod_1.z.string()).min(1),
     max_results: zod_1.z.number().int().min(1).max(500).default(50),
     date_range: zod_1.z
-        .object({ start: zod_1.z.string(), end: zod_1.z.string() })
+        .object({
+        start: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+        end: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+        .refine((r) => r.start <= r.end, {
+        message: "date_range.start must be <= date_range.end",
+    })
         .optional(),
 });
 const BlogsSourceSchema = zod_1.z.object({

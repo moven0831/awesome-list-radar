@@ -17,7 +17,17 @@ const ArxivSourceSchema = z.object({
   keywords: z.array(z.string()).min(1),
   max_results: z.number().int().min(1).max(500).default(50),
   date_range: z
-    .object({ start: z.string(), end: z.string() })
+    .object({
+      start: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+      end: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+    .refine((r) => r.start <= r.end, {
+      message: "date_range.start must be <= date_range.end",
+    })
     .optional(),
 });
 
