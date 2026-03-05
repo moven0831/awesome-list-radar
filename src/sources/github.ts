@@ -67,11 +67,12 @@ export async function collectGitHub(
   try {
     const gh = config.sources.github;
     const maxResults = gh.max_results;
-    const perPage = Math.min(maxResults, 100);
     let page = 1;
     let fetched = 0;
 
     while (fetched < maxResults) {
+      const remaining = maxResults - fetched;
+      const perPage = Math.min(remaining, 100);
       const response = await client.search.repos({
         q: query,
         sort: gh.sort === "best-match" ? undefined : gh.sort,
@@ -96,8 +97,7 @@ export async function collectGitHub(
         fetched++;
       }
 
-      // No more results
-      if (response.data.items.length < perPage) break;
+      if (response.data.items.length < perPage || fetched >= response.data.total_count) break;
       page++;
     }
   } catch (error) {
