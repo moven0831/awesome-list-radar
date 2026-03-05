@@ -25,6 +25,7 @@ const baseConfig = {
     arxiv: {
       categories: ["cs.CR", "cs.DC"],
       keywords: ["GPU", "MSM", "zero-knowledge"],
+      max_results: 50,
     },
   },
   classification: {
@@ -46,18 +47,41 @@ describe("buildArxivQuery", () => {
   });
 
   it("quotes keywords for exact matching", () => {
-    const config = {
+    const config: RadarConfig = {
       ...baseConfig,
       sources: {
         arxiv: {
           categories: ["cs.CR"],
           keywords: ["zero knowledge proofs"],
+          max_results: 50,
         },
       },
     } as RadarConfig;
 
     const query = buildArxivQuery(config);
     expect(query).toContain('all:"zero knowledge proofs"');
+  });
+
+  it("includes date_range filter when configured", () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        arxiv: {
+          categories: ["cs.CR"],
+          keywords: ["GPU"],
+          max_results: 50,
+          date_range: { start: "20240101", end: "20240131" },
+        },
+      },
+    } as RadarConfig;
+
+    const query = buildArxivQuery(config);
+    expect(query).toContain("submittedDate:[20240101 TO 20240131]");
+  });
+
+  it("omits date_range filter when not configured", () => {
+    const query = buildArxivQuery(baseConfig);
+    expect(query).not.toContain("submittedDate");
   });
 });
 
@@ -70,6 +94,20 @@ describe("buildArxivUrl", () => {
     // URL should be parseable without errors
     const parsed = new URL(url);
     expect(parsed.searchParams.get("search_query")).toBe(query);
+    expect(parsed.searchParams.get("max_results")).toBe("50");
+  });
+
+  it("uses custom max_results in URL", () => {
+    const query = "cat:cs.CR AND all:GPU";
+    const url = buildArxivUrl(query, 100);
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("max_results")).toBe("100");
+  });
+
+  it("defaults to 50 when max_results not provided", () => {
+    const query = "cat:cs.CR AND all:GPU";
+    const url = buildArxivUrl(query);
+    const parsed = new URL(url);
     expect(parsed.searchParams.get("max_results")).toBe("50");
   });
 });

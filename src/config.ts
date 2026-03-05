@@ -15,6 +15,10 @@ const GithubSourceSchema = z.object({
 const ArxivSourceSchema = z.object({
   categories: z.array(z.string()).min(1),
   keywords: z.array(z.string()).min(1),
+  max_results: z.number().int().min(1).max(500).default(50),
+  date_range: z
+    .object({ start: z.string(), end: z.string() })
+    .optional(),
 });
 
 const BlogsSourceSchema = z.object({
@@ -25,6 +29,10 @@ const BlogsSourceSchema = z.object({
 const WebPagesSourceSchema = z.object({
   urls: z.array(z.string().url()).min(1),
   keywords: z.array(z.string()).optional(),
+  extraction_prompt: z.string().optional(),
+  model: z.string().default("claude-haiku-4-5-20251001"),
+  request_timeout: z.number().int().min(1000).max(120000).default(30000),
+  user_agent: z.string().optional(),
 });
 
 const SourcesSchema = z.object({

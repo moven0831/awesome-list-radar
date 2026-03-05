@@ -24,14 +24,20 @@ function buildArxivQuery(config: RadarConfig): string {
   const kwQuery =
     kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
 
-  return `${catQuery} AND ${kwQuery}`;
+  let query = `${catQuery} AND ${kwQuery}`;
+
+  if (arxiv.date_range) {
+    query += ` AND submittedDate:[${arxiv.date_range.start} TO ${arxiv.date_range.end}]`;
+  }
+
+  return query;
 }
 
-function buildArxivUrl(query: string): string {
+function buildArxivUrl(query: string, maxResults: number = 50): string {
   const url = new URL(ARXIV_API_URL);
   url.searchParams.set("search_query", query);
   url.searchParams.set("start", "0");
-  url.searchParams.set("max_results", "50");
+  url.searchParams.set("max_results", String(maxResults));
   url.searchParams.set("sortBy", "submittedDate");
   url.searchParams.set("sortOrder", "descending");
   return url.toString();
@@ -53,7 +59,7 @@ export async function collectArxiv(
   if (!config.sources.arxiv) return [];
 
   const query = buildArxivQuery(config);
-  const url = buildArxivUrl(query);
+  const url = buildArxivUrl(query, config.sources.arxiv!.max_results);
 
   core.info(`arXiv query URL: ${url}`);
 
