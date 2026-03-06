@@ -1,0 +1,20 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "ffc5b1c60fac",
+  "strategy": "manual-commit",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "action.yml",
+    "src/config.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ff/c5b1c60fac/0/metadata.json",
+      "transcript": "/ff/c5b1c60fac/0/full.jsonl",
+      "context": "",
+      "content_hash": "/ff/c5b1c60fac/0/content_hash.txt",
+      "prompt": ""
+    }
+  ]
+}
