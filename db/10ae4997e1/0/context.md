@@ -202,3 +202,9 @@ If we want to make the current work become agent-agnostic, what is the best appr
 
 the CI failed
 
+### Prompt 31
+
+Stop hook feedback:
+
+If we want to make the current work become agent-agnostic, what is the best approach? Use the same tech stack (e.g. bun instead of npm) --max-iteration 20
+
