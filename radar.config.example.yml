@@ -29,9 +29,13 @@ sources:
     keywords: [your topic, related keyword]
 
 classification:
-  model: claude-sonnet-4-6
+  provider: anthropic      # anthropic | openai | google
+  # model: claude-sonnet-4-6  # Optional: defaults based on provider
+  #   anthropic -> claude-sonnet-4-6
+  #   openai    -> gpt-4o-mini
+  #   google    -> gemini-2.0-flash
   threshold: 70          # 0-100, only create issues for scores above this
-  max_issues_per_run: 5  # Caps the number of LLM API calls per run
+  max_classifications_per_run: 5  # Caps the number of LLM API calls per run
 
 issue_template:
   labels: [radar, needs-review]
