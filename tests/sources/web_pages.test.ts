@@ -20,12 +20,14 @@ const baseConfig = {
     web_pages: {
       urls: ["https://example.com/blog"],
       keywords: ["gpu proving", "webgpu"],
+      model: "claude-haiku-4-5-20251001",
+      request_timeout: 30000,
     },
   },
   classification: {
     model: "claude-sonnet-4-6",
     threshold: 70,
-    max_issues_per_run: 5,
+    max_classifications_per_run: 5,
   },
   issue_template: { labels: ["radar"] },
 } as RadarConfig;
@@ -155,6 +157,8 @@ describe("collectWebPages", () => {
       sources: {
         web_pages: {
           urls: ["https://example.com/blog"],
+          model: "claude-haiku-4-5-20251001",
+          request_timeout: 30000,
         },
       },
     } as RadarConfig;
@@ -228,6 +232,8 @@ describe("collectWebPages", () => {
             "https://blog2.example.com/",
           ],
           keywords: ["gpu"],
+          model: "claude-haiku-4-5-20251001",
+          request_timeout: 30000,
         },
       },
     } as RadarConfig;
@@ -274,5 +280,130 @@ describe("collectWebPages", () => {
       mockClient
     );
     expect(candidates).toEqual([]);
+  });
+
+  it("passes custom model to Anthropic API", async () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        web_pages: {
+          urls: ["https://example.com/blog"],
+          model: "claude-sonnet-4-6",
+          request_timeout: 30000,
+        },
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>Content</body></html>"),
+    });
+
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "[]" }],
+        }),
+      },
+    } as any;
+
+    await collectWebPages(config, mockFetch as any, mockClient);
+    expect(mockClient.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-sonnet-4-6" })
+    );
+  });
+
+  it("uses custom extraction_prompt as system prompt", async () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        web_pages: {
+          urls: ["https://example.com/blog"],
+          extraction_prompt: "Custom prompt here",
+          model: "claude-haiku-4-5-20251001",
+          request_timeout: 30000,
+        },
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>Content</body></html>"),
+    });
+
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "[]" }],
+        }),
+      },
+    } as any;
+
+    await collectWebPages(config, mockFetch as any, mockClient);
+    expect(mockClient.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({ system: "Custom prompt here" })
+    );
+  });
+
+  it("applies request_timeout as AbortSignal on fetch", async () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        web_pages: {
+          urls: ["https://example.com/blog"],
+          model: "claude-haiku-4-5-20251001",
+          request_timeout: 5000,
+        },
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>Content</body></html>"),
+    });
+
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "[]" }],
+        }),
+      },
+    } as any;
+
+    await collectWebPages(config, mockFetch as any, mockClient);
+    const fetchCall = mockFetch.mock.calls[0];
+    expect(fetchCall[1]).toBeDefined();
+    expect(fetchCall[1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("sends user_agent header when configured", async () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        web_pages: {
+          urls: ["https://example.com/blog"],
+          model: "claude-haiku-4-5-20251001",
+          request_timeout: 30000,
+          user_agent: "MyBot/1.0",
+        },
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>Content</body></html>"),
+    });
+
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "[]" }],
+        }),
+      },
+    } as any;
+
+    await collectWebPages(config, mockFetch as any, mockClient);
+    const fetchCall = mockFetch.mock.calls[0];
+    expect(fetchCall[1].headers).toEqual({ "User-Agent": "MyBot/1.0" });
   });
 });

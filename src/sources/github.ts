@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/rest";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 
@@ -39,6 +40,16 @@ function buildSearchQuery(
   const after = createdAfterDate(gh.created_after);
   parts.push(`created:>=${after}`);
 
+  if (gh.exclude_forks) {
+    parts.push("fork:false");
+  } else {
+    parts.push("fork:true");
+  }
+
+  if (gh.exclude_archived) {
+    parts.push("archived:false");
+  }
+
   return parts.join(" ");
 }
 
@@ -57,34 +68,46 @@ export async function collectGitHub(
   const candidates: Candidate[] = [];
 
   try {
-    // Note: fetches a single page (100 results) sorted by stars.
-    // GitHub Search API supports up to 1000 results via pagination,
-    // but for a radar scan the top 100 by stars is sufficient.
-    const response = await client.search.repos({
-      q: query,
-      sort: "stars",
-      order: "desc",
-      per_page: 100,
-    });
+    const gh = config.sources.github;
+    const maxResults = gh.max_results;
+    let page = 1;
+    let fetched = 0;
 
-    for (const repo of response.data.items) {
-      candidates.push({
-        url: repo.html_url,
-        title: repo.full_name,
-        description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
-        source: "github",
-        metadata: {
-          stars: repo.stargazers_count,
-          language: repo.language ?? undefined,
-          topics: repo.topics ?? [],
-          license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
-          archived: repo.archived ?? undefined,
-          fork: repo.fork ?? undefined,
-          owner: repo.owner?.login ?? undefined,
-          homepage: repo.homepage || undefined,
-          lastPushedAt: repo.pushed_at ?? undefined,
-        },
-      });
+    while (fetched < maxResults) {
+      const remaining = maxResults - fetched;
+      const perPage = Math.min(remaining, 100);
+      const response = await withRetry(() => client.search.repos({
+        q: query,
+        sort: gh.sort === "best-match" ? undefined : gh.sort,
+        order: "desc",
+        per_page: perPage,
+        page,
+      }));
+
+      for (const repo of response.data.items) {
+        if (fetched >= maxResults) break;
+        candidates.push({
+          url: repo.html_url,
+          title: repo.full_name,
+          description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
+          source: "github",
+          metadata: {
+            stars: repo.stargazers_count,
+            language: repo.language ?? undefined,
+            topics: repo.topics ?? [],
+            license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
+            archived: repo.archived ?? undefined,
+            fork: repo.fork ?? undefined,
+            owner: repo.owner?.login ?? undefined,
+            homepage: repo.homepage || undefined,
+            lastPushedAt: repo.pushed_at ?? undefined,
+          },
+        });
+        fetched++;
+      }
+
+      if (response.data.items.length < perPage || fetched >= response.data.total_count) break;
+      page++;
     }
   } catch (error) {
     core.warning(

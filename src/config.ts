@@ -10,11 +10,29 @@ const GithubSourceSchema = z.object({
     .string()
     .regex(/^\d+d$/, 'Must be in format "Nd" (e.g. "30d")')
     .default("30d"),
+  max_results: z.number().int().min(1).max(1000).default(100),
+  sort: z.enum(["stars", "updated", "best-match"]).default("stars"),
+  exclude_forks: z.boolean().default(false),
+  exclude_archived: z.boolean().default(false),
 });
 
 const ArxivSourceSchema = z.object({
   categories: z.array(z.string()).min(1),
   keywords: z.array(z.string()).min(1),
+  max_results: z.number().int().min(1).max(500).default(50),
+  date_range: z
+    .object({
+      start: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+      end: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+    .refine((r) => r.start <= r.end, {
+      message: "date_range.start must be <= date_range.end",
+    })
+    .optional(),
 });
 
 const BlogsSourceSchema = z.object({
@@ -25,6 +43,10 @@ const BlogsSourceSchema = z.object({
 const WebPagesSourceSchema = z.object({
   urls: z.array(z.string().url()).min(1),
   keywords: z.array(z.string()).optional(),
+  extraction_prompt: z.string().min(1).optional(),
+  model: z.string().min(1).default("claude-haiku-4-5-20251001"),
+  request_timeout: z.number().int().min(1000).max(120000).default(30000),
+  user_agent: z.string().optional(),
 });
 
 const SourcesSchema = z.object({
@@ -49,8 +71,13 @@ const FilterSchema = z
 const ClassificationSchema = z.object({
   model: z.string().default("claude-sonnet-4-6"),
   threshold: z.number().min(0).max(100).default(70),
-  max_issues_per_run: z.number().int().positive().default(5),
-});
+  max_classifications_per_run: z.number().int().positive().optional(),
+  max_issues_per_run: z.number().int().positive().optional(), // deprecated alias
+  max_budget_usd: z.number().positive().optional(),
+}).transform((val) => ({
+  ...val,
+  max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
+}));
 
 const IssueTemplateSchema = z.object({
   labels: z.array(z.string()).default(["radar", "needs-review"]),

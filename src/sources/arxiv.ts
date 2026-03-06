@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { XMLParser } from "fast-xml-parser";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -24,14 +25,20 @@ function buildArxivQuery(config: RadarConfig): string {
   const kwQuery =
     kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
 
-  return `${catQuery} AND ${kwQuery}`;
+  let query = `${catQuery} AND ${kwQuery}`;
+
+  if (arxiv.date_range) {
+    query += ` AND submittedDate:[${arxiv.date_range.start} TO ${arxiv.date_range.end}]`;
+  }
+
+  return query;
 }
 
-function buildArxivUrl(query: string): string {
+function buildArxivUrl(query: string, maxResults: number = 50): string {
   const url = new URL(ARXIV_API_URL);
   url.searchParams.set("search_query", query);
   url.searchParams.set("start", "0");
-  url.searchParams.set("max_results", "50");
+  url.searchParams.set("max_results", String(maxResults));
   url.searchParams.set("sortBy", "submittedDate");
   url.searchParams.set("sortOrder", "descending");
   return url.toString();
@@ -53,16 +60,20 @@ export async function collectArxiv(
   if (!config.sources.arxiv) return [];
 
   const query = buildArxivQuery(config);
-  const url = buildArxivUrl(query);
+  const url = buildArxivUrl(query, config.sources.arxiv!.max_results);
 
   core.info(`arXiv query URL: ${url}`);
 
   try {
-    const response = await fetchFn(url);
-    if (!response.ok) {
-      core.warning(`arXiv API returned ${response.status}`);
-      return [];
-    }
+    const response = await withRetry(async () => {
+      const res = await fetchFn(url);
+      if (!res.ok) {
+        throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+          status: res.status,
+        });
+      }
+      return res;
+    });
 
     const xml = await response.text();
     const parser = new XMLParser({
