@@ -21,6 +21,10 @@ const baseConfig = {
       languages: ["rust", "cuda"],
       min_stars: 5,
       created_after: "30d",
+      max_results: 100,
+      sort: "stars",
+      exclude_forks: false,
+      exclude_archived: false,
     },
   },
   classification: {
@@ -82,12 +86,46 @@ describe("buildSearchQuery", () => {
           topics: ["test"],
           min_stars: 0,
           created_after: "30d",
+          max_results: 100,
+          sort: "stars" as const,
+          exclude_forks: false,
+          exclude_archived: false,
         },
       },
     } as RadarConfig;
 
     const query = buildSearchQuery(config.sources.github!.topics, config);
     expect(query).not.toContain("language:");
+  });
+
+  it("appends fork:false when exclude_forks is true", () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, exclude_forks: true },
+      },
+    } as RadarConfig;
+
+    const query = buildSearchQuery(config.sources.github!.topics, config);
+    expect(query).toContain("fork:false");
+  });
+
+  it("appends archived:false when exclude_archived is true", () => {
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, exclude_archived: true },
+      },
+    } as RadarConfig;
+
+    const query = buildSearchQuery(config.sources.github!.topics, config);
+    expect(query).toContain("archived:false");
+  });
+
+  it("includes fork:true by default to include forks in results", () => {
+    const query = buildSearchQuery(baseConfig.sources.github!.topics, baseConfig);
+    expect(query).toContain("fork:true");
+    expect(query).not.toContain("archived:");
   });
 });
 
@@ -181,5 +219,104 @@ describe("collectGitHub", () => {
 
     const candidates = await collectGitHub(baseConfig, mockOctokit);
     expect(candidates).toEqual([]);
+  });
+
+  it("paginates to fetch multiple pages up to max_results", async () => {
+    const makeItems = (count: number, offset: number = 0) =>
+      Array.from({ length: count }, (_, i) => ({
+        html_url: `https://github.com/test/repo${offset + i}`,
+        full_name: `test/repo${offset + i}`,
+        description: `Repo ${offset + i}`,
+        stargazers_count: 100 - offset - i,
+        language: "Rust",
+        topics: ["test"],
+      }));
+
+    const mockOctokit = {
+      search: {
+        repos: vi
+          .fn()
+          .mockResolvedValueOnce({ data: { items: makeItems(100, 0) } })
+          .mockResolvedValueOnce({ data: { items: makeItems(50, 100) } }),
+      },
+    } as any;
+
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, max_results: 200 },
+      },
+    } as RadarConfig;
+
+    const candidates = await collectGitHub(config, mockOctokit);
+    expect(candidates).toHaveLength(150);
+    expect(mockOctokit.search.repos).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps results at max_results even when API returns more", async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({
+      html_url: `https://github.com/test/repo${i}`,
+      full_name: `test/repo${i}`,
+      description: `Repo ${i}`,
+      stargazers_count: 100 - i,
+      language: "Rust",
+      topics: ["test"],
+    }));
+
+    const mockOctokit = {
+      search: {
+        repos: vi.fn().mockResolvedValue({ data: { items } }),
+      },
+    } as any;
+
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, max_results: 50 },
+      },
+    } as RadarConfig;
+
+    const candidates = await collectGitHub(config, mockOctokit);
+    expect(candidates).toHaveLength(50);
+  });
+
+  it("passes sort parameter correctly to API", async () => {
+    const mockOctokit = {
+      search: {
+        repos: vi.fn().mockResolvedValue({ data: { items: [] } }),
+      },
+    } as any;
+
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, sort: "updated" as const },
+      },
+    } as RadarConfig;
+
+    await collectGitHub(config, mockOctokit);
+    expect(mockOctokit.search.repos).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: "updated" })
+    );
+  });
+
+  it("passes undefined sort for best-match", async () => {
+    const mockOctokit = {
+      search: {
+        repos: vi.fn().mockResolvedValue({ data: { items: [] } }),
+      },
+    } as any;
+
+    const config = {
+      ...baseConfig,
+      sources: {
+        github: { ...baseConfig.sources.github!, sort: "best-match" as const },
+      },
+    } as RadarConfig;
+
+    await collectGitHub(config, mockOctokit);
+    expect(mockOctokit.search.repos).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: undefined })
+    );
   });
 });
