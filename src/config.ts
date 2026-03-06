@@ -19,6 +19,20 @@ const GithubSourceSchema = z.object({
 const ArxivSourceSchema = z.object({
   categories: z.array(z.string()).min(1),
   keywords: z.array(z.string()).min(1),
+  max_results: z.number().int().min(1).max(500).default(50),
+  date_range: z
+    .object({
+      start: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+      end: z
+        .string()
+        .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+    .refine((r) => r.start <= r.end, {
+      message: "date_range.start must be <= date_range.end",
+    })
+    .optional(),
 });
 
 const BlogsSourceSchema = z.object({
@@ -29,6 +43,10 @@ const BlogsSourceSchema = z.object({
 const WebPagesSourceSchema = z.object({
   urls: z.array(z.string().url()).min(1),
   keywords: z.array(z.string()).optional(),
+  extraction_prompt: z.string().min(1).optional(),
+  model: z.string().min(1).default("claude-haiku-4-5-20251001"),
+  request_timeout: z.number().int().min(1000).max(120000).default(30000),
+  user_agent: z.string().optional(),
 });
 
 const SourcesSchema = z.object({

@@ -194,6 +194,56 @@ sources:
     expect(config.classification.max_budget_usd).toBeUndefined();
   });
 
+  it("parses arxiv max_results and date_range", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+    max_results: 100
+    date_range:
+      start: "20240101"
+      end: "20240131"
+`);
+    expect(config.sources.arxiv?.max_results).toBe(100);
+    expect(config.sources.arxiv?.date_range).toEqual({
+      start: "20240101",
+      end: "20240131",
+    });
+  });
+
+  it("applies arxiv max_results default of 50", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+`);
+    expect(config.sources.arxiv?.max_results).toBe(50);
+    expect(config.sources.arxiv?.date_range).toBeUndefined();
+  });
+
+  it("rejects arxiv max_results out of range", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+    max_results: 1000
+`)
+    ).toThrow();
+  });
+
   it("applies defaults for new github fields", () => {
     const config = parseConfig(`
 description: test
@@ -244,6 +294,51 @@ sources:
   github:
     topics: [test]
     max_results: 0
+`)
+    ).toThrow();
+  });
+
+  it("parses web_pages new config fields with defaults", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+`);
+    expect(config.sources.web_pages?.model).toBe("claude-haiku-4-5-20251001");
+    expect(config.sources.web_pages?.request_timeout).toBe(30000);
+    expect(config.sources.web_pages?.extraction_prompt).toBeUndefined();
+    expect(config.sources.web_pages?.user_agent).toBeUndefined();
+  });
+
+  it("parses web_pages custom config fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    extraction_prompt: "Custom prompt"
+    model: "claude-sonnet-4-6"
+    request_timeout: 60000
+    user_agent: "MyBot/1.0"
+`);
+    expect(config.sources.web_pages?.extraction_prompt).toBe("Custom prompt");
+    expect(config.sources.web_pages?.model).toBe("claude-sonnet-4-6");
+    expect(config.sources.web_pages?.request_timeout).toBe(60000);
+    expect(config.sources.web_pages?.user_agent).toBe("MyBot/1.0");
+  });
+
+  it("rejects web_pages request_timeout out of range", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    request_timeout: 500
 `)
     ).toThrow();
   });
