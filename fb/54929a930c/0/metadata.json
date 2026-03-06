@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "fb54929a930c",
+  "session_id": "5fb2782e-7a76-42d5-87ce-3068969aec75",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T13:19:12.912074Z",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "radar.config.example.yml"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "fcc9072858c3",
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T13:19:12.911883Z",
+    "agent_lines": 28,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 28,
+    "agent_percentage": 100
+  }
+}
