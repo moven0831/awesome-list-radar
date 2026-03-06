@@ -25,6 +25,7 @@ const baseConfig = {
     },
   },
   classification: {
+    provider: "anthropic",
     model: "claude-sonnet-4-6",
     threshold: 70,
     max_classifications_per_run: 5,
@@ -124,16 +125,10 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"GPU Proving Post","url":"https://example.com/gpu-proving"},{"title":"Cooking Tips","url":"https://example.com/cooking"}]',
-            },
-          ],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: '[{"title":"GPU Proving Post","url":"https://example.com/gpu-proving"},{"title":"Cooking Tips","url":"https://example.com/cooking"}]',
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     const candidates = await collectWebPages(
@@ -169,16 +164,10 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"Post 1","url":"https://example.com/1"},{"title":"Post 2","url":"https://example.com/2"}]',
-            },
-          ],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: '[{"title":"Post 1","url":"https://example.com/1"},{"title":"Post 2","url":"https://example.com/2"}]',
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     const candidates = await collectWebPages(config, mockFetch as any, mockClient);
@@ -190,7 +179,7 @@ describe("collectWebPages", () => {
       .fn()
       .mockRejectedValue(new Error("Network error"));
 
-    const mockClient = { messages: { create: vi.fn() } } as any;
+    const mockClient = { chat: vi.fn() } as any;
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -207,11 +196,9 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi
-          .fn()
-          .mockRejectedValue(new Error("API error")),
-      },
+      chat: vi
+        .fn()
+        .mockRejectedValue(new Error("API error")),
     } as any;
 
     const candidates = await collectWebPages(
@@ -244,16 +231,10 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"GPU Post","url":"https://example.com/gpu"}]',
-            },
-          ],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: '[{"title":"GPU Post","url":"https://example.com/gpu"}]',
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     const candidates = await collectWebPages(
@@ -272,7 +253,7 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("Forbidden"),
     });
 
-    const mockClient = { messages: { create: vi.fn() } } as any;
+    const mockClient = { chat: vi.fn() } as any;
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -300,15 +281,14 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: "[]",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     await collectWebPages(config, mockFetch as any, mockClient);
-    expect(mockClient.messages.create).toHaveBeenCalledWith(
+    expect(mockClient.chat).toHaveBeenCalledWith(
       expect.objectContaining({ model: "claude-sonnet-4-6" })
     );
   });
@@ -332,15 +312,14 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: "[]",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     await collectWebPages(config, mockFetch as any, mockClient);
-    expect(mockClient.messages.create).toHaveBeenCalledWith(
+    expect(mockClient.chat).toHaveBeenCalledWith(
       expect.objectContaining({ system: "Custom prompt here" })
     );
   });
@@ -363,11 +342,10 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: "[]",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     await collectWebPages(config, mockFetch as any, mockClient);
@@ -395,11 +373,10 @@ describe("collectWebPages", () => {
     });
 
     const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
+      chat: vi.fn().mockResolvedValue({
+        text: "[]",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
     } as any;
 
     await collectWebPages(config, mockFetch as any, mockClient);
