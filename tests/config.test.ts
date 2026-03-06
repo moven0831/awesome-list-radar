@@ -569,6 +569,29 @@ sources:
     expect(config.sources.web_pages?.provider).toBe("openai");
   });
 
+  it("accepts optional base_url for classification", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: openai
+  base_url: https://custom-llm.example.com/v1/
+`);
+    expect(config.classification.base_url).toBe("https://custom-llm.example.com/v1/");
+  });
+
+  it("defaults base_url to undefined", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.base_url).toBeUndefined();
+  });
+
   it("rejects invalid classification provider", () => {
     expect(() =>
       parseConfig(`

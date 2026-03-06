@@ -34,6 +34,7 @@ classification:
   #   anthropic -> claude-sonnet-4-6
   #   openai    -> gpt-4o-mini
   #   google    -> gemini-2.0-flash
+  # base_url: https://...  # Optional: custom OpenAI-compatible endpoint
   threshold: 70          # 0-100, only create issues for scores above this
   max_classifications_per_run: 5  # Caps the number of LLM API calls per run
 

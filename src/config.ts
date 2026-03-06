@@ -81,6 +81,7 @@ const FilterSchema = z
 
 const ClassificationSchema = z.object({
   provider: z.enum(["anthropic", "openai", "google"]).default("anthropic"),
+  base_url: z.string().url().optional(),
   model: z.string().optional(),
   threshold: z.number().min(0).max(100).default(70),
   max_classifications_per_run: z.number().int().positive().optional(),

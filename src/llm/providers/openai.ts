@@ -1,11 +1,11 @@
 import OpenAI from "openai";
 import type { LLMProvider, LLMRequest, LLMResponse } from "../types";
 
-export class OpenAIProvider implements LLMProvider {
+export class OpenAICompatibleProvider implements LLMProvider {
   private client: OpenAI;
 
-  constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey });
+  constructor(apiKey: string, baseURL?: string) {
+    this.client = new OpenAI({ apiKey, baseURL });
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {

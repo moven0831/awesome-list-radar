@@ -1,23 +1,19 @@
 export type { LLMProvider, LLMRequest, LLMResponse } from "./types";
 import type { LLMProvider } from "./types";
+import { OpenAICompatibleProvider } from "./providers/openai";
 
-export function createProvider(provider: string, apiKey: string): LLMProvider {
-  switch (provider) {
-    case "anthropic": {
-      const { AnthropicProvider } = require("./providers/anthropic");
-      return new AnthropicProvider(apiKey);
-    }
-    case "openai": {
-      const { OpenAIProvider } = require("./providers/openai");
-      return new OpenAIProvider(apiKey);
-    }
-    case "google": {
-      const { GoogleProvider } = require("./providers/google");
-      return new GoogleProvider(apiKey);
-    }
-    default:
-      throw new Error(
-        `Unknown LLM provider: "${provider}". Supported providers: anthropic, openai, google`
-      );
-  }
+const PROVIDER_BASE_URLS: Record<string, string | undefined> = {
+  openai: undefined,
+  anthropic: "https://api.anthropic.com/v1/",
+  google: "https://generativelanguage.googleapis.com/v1beta/openai/",
+};
+
+export function createProvider(options: {
+  provider?: string;
+  baseUrl?: string;
+  apiKey: string;
+}): LLMProvider {
+  const baseURL =
+    options.baseUrl ?? PROVIDER_BASE_URLS[options.provider ?? "openai"];
+  return new OpenAICompatibleProvider(options.apiKey, baseURL);
 }

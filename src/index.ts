@@ -57,7 +57,11 @@ async function run(): Promise<void> {
     if (!apiKey) {
       throw new Error("Either llm_api_key or anthropic_api_key must be provided");
     }
-    const llmClient = createProvider(config.classification.provider, apiKey);
+    const llmClient = createProvider({
+      provider: config.classification.provider,
+      baseUrl: config.classification.base_url,
+      apiKey,
+    });
 
     // Load state
     const state = loadState(config.state_file);
