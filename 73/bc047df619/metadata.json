@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "73bc047df619",
+  "strategy": "manual-commit",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/llm/index.ts",
+    "src/llm/providers/anthropic.ts",
+    "src/llm/providers/google.ts",
+    "src/llm/providers/openai.ts",
+    "src/llm/types.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/73/bc047df619/0/metadata.json",
+      "transcript": "/73/bc047df619/0/full.jsonl",
+      "context": "/73/bc047df619/0/context.md",
+      "content_hash": "/73/bc047df619/0/content_hash.txt",
+      "prompt": "/73/bc047df619/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 21,
+    "cache_creation_tokens": 55360,
+    "cache_read_tokens": 587983,
+    "output_tokens": 5901,
+    "api_call_count": 14
+  }
+}

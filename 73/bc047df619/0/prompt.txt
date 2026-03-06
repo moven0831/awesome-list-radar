@@ -1,0 +1,400 @@
+Implement the following plan:
+
+# Plan: Make Awesome List Radar LLM-Provider-Agnostic
+
+## Context
+
+The project currently hardcodes Anthropic's Claude SDK (`@anthropic-ai/sdk`) as the only LLM provider. This limits users to Anthropic and creates vendor lock-in. The goal is to support multiple LLM providers (Anthropic, OpenAI, Google Gemini) while keeping the existing tech stack (bun, TypeScript, GitHub Actions).
+
+**Approach chosen: Custom thin abstraction layer** over Vercel AI SDK (overkill for text-in/JSON-out) or OpenAI-compatible API (fragile cross-provider compatibility).
+
+The LLM surface area is narrow -- only 2 files make LLM calls, both doing simple `system + user message -> text response` with token counting.
+
+## Steps
+
+### 1. Install dependencies
+
+`bun add openai @google/generative-ai` (keep existing `@anthropic-ai/sdk`)
+
+**Commit:** `chore: add openai and google-generative-ai dependencies`
+
+### 2. Create LLM abstraction layer
+
+All new files — no existing code touched.
+
+**`src/llm/types.ts`** — interface definitions:
+```typescript
+export interface LLMRequest {
+  model: string;
+  maxTokens: number;
+  system: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+}
+
+export interface LLMResponse {
+  text: string;
+  usage: { inputTokens: number; outputTokens: number };
+}
+
+export interface LLMProvider {
+  chat(request: LLMRequest): Promise<LLMResponse>;
+}
+```
+
+**`src/llm/providers/anthropic.ts`** — wraps `@anthropic-ai/sdk`, maps `messages.create()` → `LLMResponse`
+**`src/llm/providers/openai.ts`** — wraps `openai`, maps `chat.completions.create()` → `LLMResponse`
+**`src/llm/providers/google.ts`** — wraps `@google/generative-ai`, maps `generateContent()` → `LLMResponse`
+
+**`src/llm/index.ts`** — factory + re-exports:
+```typescript
+export function createProvider(provider: string, apiKey: string): LLMProvider
+```
+
+**Commit:** `feat: add LLM provider abstraction layer`
+
+### 3. Update configuration
+
+Two files that define how users configure the provider — both config schema and action inputs.
+
+**`src/config.ts`:**
+- `ClassificationSchema`: add `provider: z.enum(["anthropic", "openai", "google"]).default("anthropic")`
+- Remove hardcoded Claude model defaults. Add per-provider default model resolution:
+  - anthropic → `claude-sonnet-4-6`
+  - openai → `gpt-4o-mini`
+  - google → `gemini-2.0-flash`
+- `WebPagesSourceSchema`: add optional `provider` field (falls back to classification provider). Same per-provider default model logic.
+
+**`action.yml`:**
+- Replace `anthropic_api_key` with `llm_api_key` (required: true)
+- Add `llm_provider` input (required: false, default: "anthropic")
+
+**Commit:** `feat: add provider and model configuration`
+
+### 4. Refactor LLM consumers
+
+All existing code changes to use the new abstraction. Touches 3 files.
+
+**`src/classifier/llm.ts`:**
+- Replace `import Anthropic` → `import type { LLMProvider }`
+- Change `client?: Anthropic` → `client?: LLMProvider`
+- Replace `anthropic.messages.create({...})` → `client.chat({...})`
+- Simplify response extraction: `response.text` instead of `message.content[0].type === "text" ? ...`
+- Token tracking: `response.usage.inputTokens` instead of `message.usage?.input_tokens`
+- Remove Anthropic client construction
+- Expand `MODEL_PRICING` with OpenAI and Google models
+
+**`src/sources/web_pages.ts`:**
+- Same pattern: swap `Anthropic` → `LLMProvider`, simplify response handling
+
+**`src/index.ts`:**
+- Import `createProvider` from `./llm`
+- Read `llm_api_key` and `llm_provider` from action inputs
+- Create single `LLMProvider` instance, pass to both `collectWebPages()` and `classifyCandidates()`
+
+**Commit:** `refactor: use LLM provider abstraction in classifier and web pages`
+
+### 5. Update tests
+
+**Modify existing:**
+- `tests/classifier/llm.test.ts`: mock `{ messages: { create: vi.fn() } }` → `{ chat: vi.fn() }` (simpler)
+- `tests/sources/web_pages.test.ts`: same mock simplification
+- `tests/config.test.ts`: add tests for `provider` field and per-provider model defaults
+
+**Create new:**
+- `tests/llm/providers.test.ts`: unit tests for each adapter with mocked SDK clients
+
+**Commit:** `test: update mocks and add provider adapter tests`
+
+### 6. Update documentation
+
+- `README.md`: document `provider`, `llm_api_key`, per-provider model defaults, examples for each provider
+- `radar.config.example.yml`: add `provider` field with comments
+
+**Commit:** `docs: document multi-provider LLM support`
+
+## Files
+
+| File | Action |
+|------|--------|
+| `src/llm/types.ts` | Create |
+| `src/llm/index.ts` | Create |
+| `src/llm/providers/anthropic.ts` | Create |
+| `src/llm/providers/openai.ts` | Create |
+| `src/llm/providers/google.ts` | Create |
+| `src/config.ts` | Modify |
+| `src/classifier/llm.ts` | Modify |
+| `src/sources/web_pages.ts` | Modify |
+| `src/index.ts` | Modify |
+| `action.yml` | Modify |
+| `package.json` | Modify (via bun add) |
+| `tests/classifier/llm.test.ts` | Modify |
+| `tests/sources/web_pages.test.ts` | Modify |
+| `tests/config.test.ts` | Modify |
+| `tests/llm/providers.test.ts` | Create |
+| `README.md` | Modify |
+| `radar.config.example.yml` | Modify |
+
+## Git workflow
+
+- Create branch `feat/llm-provider-agnostic` from `main`
+- Commit each step separately with descriptive messages
+- Push and open a PR when complete
+
+## Verification
+
+1. `bun test` - all existing tests pass with updated mocks
+2. `bun run lint` - type check passes
+3. `bun run build` - ncc bundle builds successfully
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/moventsai/.claude/projects/-Users-moventsai-Projects-mine-awesome-list-radar/c31f4bee-0171-4375-b4a6-5218a600ae83.jsonl
+
+---
+
+Tool loaded.
+
+---
+
+Base directory for this skill: /Users/moventsai/.claude/plugins/cache/claude-plugins-official/superpowers/4.3.1/skills/subagent-driven-development
+
+# Subagent-Driven Development
+
+Execute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.
+
+**Core principle:** Fresh subagent per task + two-stage review (spec then quality) = high quality, fast iteration
+
+## When to Use
+
+```dot
+digraph when_to_use {
+    "Have implementation plan?" [shape=diamond];
+    "Tasks mostly independent?" [shape=diamond];
+    "Stay in this session?" [shape=diamond];
+    "subagent-driven-development" [shape=box];
+    "executing-plans" [shape=box];
+    "Manual execution or brainstorm first" [shape=box];
+
+    "Have implementation plan?" -> "Tasks mostly independent?" [label="yes"];
+    "Have implementation plan?" -> "Manual execution or brainstorm first" [label="no"];
+    "Tasks mostly independent?" -> "Stay in this session?" [label="yes"];
+    "Tasks mostly independent?" -> "Manual execution or brainstorm first" [label="no - tightly coupled"];
+    "Stay in this session?" -> "subagent-driven-development" [label="yes"];
+    "Stay in this session?" -> "executing-plans" [label="no - parallel session"];
+}
+```
+
+**vs. Executing Plans (parallel session):**
+- Same session (no context switch)
+- Fresh subagent per task (no context pollution)
+- Two-stage review after each task: spec compliance first, then code quality
+- Faster iteration (no human-in-loop between tasks)
+
+## The Process
+
+```dot
+digraph process {
+    rankdir=TB;
+
+    subgraph cluster_per_task {
+        label="Per Task";
+        "Dispatch implementer subagent (./implementer-prompt.md)" [shape=box];
+        "Implementer subagent asks questions?" [shape=diamond];
+        "Answer questions, provide context" [shape=box];
+        "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
+        "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [shape=box];
+        "Spec reviewer subagent confirms code matches spec?" [shape=diamond];
+        "Implementer subagent fixes spec gaps" [shape=box];
+        "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [shape=box];
+        "Code quality reviewer subagent approves?" [shape=diamond];
+        "Implementer subagent fixes quality issues" [shape=box];
+        "Mark task complete in TodoWrite" [shape=box];
+    }
+
+    "Read plan, extract all tasks with full text, note context, create TodoWrite" [shape=box];
+    "More tasks remain?" [shape=diamond];
+    "Dispatch final code reviewer subagent for entire implementation" [shape=box];
+    "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
+
+    "Read plan, extract all tasks with full text, note context, create TodoWrite" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+    "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
+    "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
+    "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+    "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
+    "Implementer subagent implements, tests, commits, self-reviews" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)";
+    "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" -> "Spec reviewer subagent confirms code matches spec?";
+    "Spec reviewer subagent confirms code matches spec?" -> "Implementer subagent fixes spec gaps" [label="no"];
+    "Implementer subagent fixes spec gaps" -> "Dispatch spec reviewer subagent (./spec-reviewer-prompt.md)" [label="re-review"];
+    "Spec reviewer subagent confirms code matches spec?" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="yes"];
+    "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" -> "Code quality reviewer subagent approves?";
+    "Code quality reviewer subagent approves?" -> "Implementer subagent fixes quality issues" [label="no"];
+    "Implementer subagent fixes quality issues" -> "Dispatch code quality reviewer subagent (./code-quality-reviewer-prompt.md)" [label="re-review"];
+    "Code quality reviewer subagent approves?" -> "Mark task complete in TodoWrite" [label="yes"];
+    "Mark task complete in TodoWrite" -> "More tasks remain?";
+    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
+    "More tasks remain?" -> "Dispatch final code reviewer subagent for entire implementation" [label="no"];
+    "Dispatch final code reviewer subagent for entire implementation" -> "Use superpowers:finishing-a-development-branch";
+}
+```
+
+## Prompt Templates
+
+- `./implementer-prompt.md` - Dispatch implementer subagent
+- `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
+- `./code-quality-reviewer-prompt.md` - Dispatch code quality reviewer subagent
+
+## Example Workflow
+
+```
+You: I'm using Subagent-Driven Development to execute this plan.
+
+[Read plan file once: docs/plans/feature-plan.md]
+[Extract all 5 tasks with full text and context]
+[Create TodoWrite with all tasks]
+
+Task 1: Hook installation script
+
+[Get Task 1 text and context (already extracted)]
+[Dispatch implementation subagent with full task text + context]
+
+Implementer: "Before I begin - should the hook be installed at user or system level?"
+
+You: "User level (~/.config/superpowers/hooks/)"
+
+Implementer: "Got it. Implementing now..."
+[Later] Implementer:
+  - Implemented install-hook command
+  - Added tests, 5/5 passing
+  - Self-review: Found I missed --force flag, added it
+  - Committed
+
+[Dispatch spec compliance reviewer]
+Spec reviewer: ✅ Spec compliant - all requirements met, nothing extra
+
+[Get git SHAs, dispatch code quality reviewer]
+Code reviewer: Strengths: Good test coverage, clean. Issues: None. Approved.
+
+[Mark Task 1 complete]
+
+Task 2: Recovery modes
+
+[Get Task 2 text and context (already extracted)]
+[Dispatch implementation subagent with full task text + context]
+
+Implementer: [No questions, proceeds]
+Implementer:
+  - Added verify/repair modes
+  - 8/8 tests passing
+  - Self-review: All good
+  - Committed
+
+[Dispatch spec compliance reviewer]
+Spec reviewer: ❌ Issues:
+  - Missing: Progress reporting (spec says "report every 100 items")
+  - Extra: Added --json flag (not requested)
+
+[Implementer fixes issues]
+Implementer: Removed --json flag, added progress reporting
+
+[Spec reviewer reviews again]
+Spec reviewer: ✅ Spec compliant now
+
+[Dispatch code quality reviewer]
+Code reviewer: Strengths: Solid. Issues (Important): Magic number (100)
+
+[Implementer fixes]
+Implementer: Extracted PROGRESS_INTERVAL constant
+
+[Code reviewer reviews again]
+Code reviewer: ✅ Approved
+
+[Mark Task 2 complete]
+
+...
+
+[After all tasks]
+[Dispatch final code-reviewer]
+Final reviewer: All requirements met, ready to merge
+
+Done!
+```
+
+## Advantages
+
+**vs. Manual execution:**
+- Subagents follow TDD naturally
+- Fresh context per task (no confusion)
+- Parallel-safe (subagents don't interfere)
+- Subagent can ask questions (before AND during work)
+
+**vs. Executing Plans:**
+- Same session (no handoff)
+- Continuous progress (no waiting)
+- Review checkpoints automatic
+
+**Efficiency gains:**
+- No file reading overhead (controller provides full text)
+- Controller curates exactly what context is needed
+- Subagent gets complete information upfront
+- Questions surfaced before work begins (not after)
+
+**Quality gates:**
+- Self-review catches issues before handoff
+- Two-stage review: spec compliance, then code quality
+- Review loops ensure fixes actually work
+- Spec compliance prevents over/under-building
+- Code quality ensures implementation is well-built
+
+**Cost:**
+- More subagent invocations (implementer + 2 reviewers per task)
+- Controller does more prep work (extracting all tasks upfront)
+- Review loops add iterations
+- But catches issues early (cheaper than debugging later)
+
+## Red Flags
+
+**Never:**
+- Start implementation on main/master branch without explicit user consent
+- Skip reviews (spec compliance OR code quality)
+- Proceed with unfixed issues
+- Dispatch multiple implementation subagents in parallel (conflicts)
+- Make subagent read plan file (provide full text instead)
+- Skip scene-setting context (subagent needs to understand where task fits)
+- Ignore subagent questions (answer before letting them proceed)
+- Accept "close enough" on spec compliance (spec reviewer found issues = not done)
+- Skip review loops (reviewer found issues = implementer fixes = review again)
+- Let implementer self-review replace actual review (both are needed)
+- **Start code quality review before spec compliance is ✅** (wrong order)
+- Move to next task while either review has open issues
+
+**If subagent asks questions:**
+- Answer clearly and completely
+- Provide additional context if needed
+- Don't rush them into implementation
+
+**If reviewer finds issues:**
+- Implementer (same subagent) fixes them
+- Reviewer reviews again
+- Repeat until approved
+- Don't skip the re-review
+
+**If subagent fails task:**
+- Dispatch fix subagent with specific instructions
+- Don't try to fix manually (context pollution)
+
+## Integration
+
+**Required workflow skills:**
+- **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
+- **superpowers:writing-plans** - Creates the plan this skill executes
+- **superpowers:requesting-code-review** - Code review template for reviewer subagents
+- **superpowers:finishing-a-development-branch** - Complete development after all tasks
+
+**Subagents should use:**
+- **superpowers:test-driven-development** - Subagents follow TDD for each task
+
+**Alternative workflow:**
+- **superpowers:executing-plans** - Use for parallel session instead of same-session execution
+
+---
+
+Tool loaded.
