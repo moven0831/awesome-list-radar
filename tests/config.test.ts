@@ -193,4 +193,58 @@ sources:
 `);
     expect(config.classification.max_budget_usd).toBeUndefined();
   });
+
+  it("applies defaults for new github fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.sources.github?.max_results).toBe(100);
+    expect(config.sources.github?.sort).toBe("stars");
+    expect(config.sources.github?.exclude_forks).toBe(false);
+    expect(config.sources.github?.exclude_archived).toBe(false);
+  });
+
+  it("parses explicit github config fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 500
+    sort: updated
+    exclude_forks: true
+    exclude_archived: true
+`);
+    expect(config.sources.github?.max_results).toBe(500);
+    expect(config.sources.github?.sort).toBe("updated");
+    expect(config.sources.github?.exclude_forks).toBe(true);
+    expect(config.sources.github?.exclude_archived).toBe(true);
+  });
+
+  it("rejects max_results greater than 1000", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 1001
+`)
+    ).toThrow();
+  });
+
+  it("rejects max_results of 0", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 0
+`)
+    ).toThrow();
+  });
 });

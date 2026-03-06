@@ -10,6 +10,10 @@ const GithubSourceSchema = z.object({
     .string()
     .regex(/^\d+d$/, 'Must be in format "Nd" (e.g. "30d")')
     .default("30d"),
+  max_results: z.number().int().min(1).max(1000).default(100),
+  sort: z.enum(["stars", "updated", "best-match"]).default("stars"),
+  exclude_forks: z.boolean().default(false),
+  exclude_archived: z.boolean().default(false),
 });
 
 const ArxivSourceSchema = z.object({

@@ -46020,6 +46020,10 @@ const GithubSourceSchema = zod_1.z.object({
         .string()
         .regex(/^\d+d$/, 'Must be in format "Nd" (e.g. "30d")')
         .default("30d"),
+    max_results: zod_1.z.number().int().min(1).max(1000).default(100),
+    sort: zod_1.z.enum(["stars", "updated", "best-match"]).default("stars"),
+    exclude_forks: zod_1.z.boolean().default(false),
+    exclude_archived: zod_1.z.boolean().default(false),
 });
 const ArxivSourceSchema = zod_1.z.object({
     categories: zod_1.z.array(zod_1.z.string()).min(1),
@@ -46853,6 +46857,15 @@ function buildSearchQuery(topics, config) {
     }
     const after = createdAfterDate(gh.created_after);
     parts.push(`created:>=${after}`);
+    if (gh.exclude_forks) {
+        parts.push("fork:false");
+    }
+    else {
+        parts.push("fork:true");
+    }
+    if (gh.exclude_archived) {
+        parts.push("archived:false");
+    }
     return parts.join(" ");
 }
 async function collectGitHub(config, octokit) {
@@ -46863,33 +46876,45 @@ async function collectGitHub(config, octokit) {
     core.info(`GitHub search query: ${query}`);
     const candidates = [];
     try {
-        // Note: fetches a single page (100 results) sorted by stars.
-        // GitHub Search API supports up to 1000 results via pagination,
-        // but for a radar scan the top 100 by stars is sufficient.
-        const response = await (0, retry_1.withRetry)(() => client.search.repos({
-            q: query,
-            sort: "stars",
-            order: "desc",
-            per_page: 100,
-        }));
-        for (const repo of response.data.items) {
-            candidates.push({
-                url: repo.html_url,
-                title: repo.full_name,
-                description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
-                source: "github",
-                metadata: {
-                    stars: repo.stargazers_count,
-                    language: repo.language ?? undefined,
-                    topics: repo.topics ?? [],
-                    license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
-                    archived: repo.archived ?? undefined,
-                    fork: repo.fork ?? undefined,
-                    owner: repo.owner?.login ?? undefined,
-                    homepage: repo.homepage || undefined,
-                    lastPushedAt: repo.pushed_at ?? undefined,
-                },
-            });
+        const gh = config.sources.github;
+        const maxResults = gh.max_results;
+        let page = 1;
+        let fetched = 0;
+        while (fetched < maxResults) {
+            const remaining = maxResults - fetched;
+            const perPage = Math.min(remaining, 100);
+            const response = await (0, retry_1.withRetry)(() => client.search.repos({
+                q: query,
+                sort: gh.sort === "best-match" ? undefined : gh.sort,
+                order: "desc",
+                per_page: perPage,
+                page,
+            }));
+            for (const repo of response.data.items) {
+                if (fetched >= maxResults)
+                    break;
+                candidates.push({
+                    url: repo.html_url,
+                    title: repo.full_name,
+                    description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
+                    source: "github",
+                    metadata: {
+                        stars: repo.stargazers_count,
+                        language: repo.language ?? undefined,
+                        topics: repo.topics ?? [],
+                        license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
+                        archived: repo.archived ?? undefined,
+                        fork: repo.fork ?? undefined,
+                        owner: repo.owner?.login ?? undefined,
+                        homepage: repo.homepage || undefined,
+                        lastPushedAt: repo.pushed_at ?? undefined,
+                    },
+                });
+                fetched++;
+            }
+            if (response.data.items.length < perPage || fetched >= response.data.total_count)
+                break;
+            page++;
         }
     }
     catch (error) {
