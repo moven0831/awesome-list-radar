@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/rest";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 
@@ -60,12 +61,14 @@ export async function collectGitHub(
     // Note: fetches a single page (100 results) sorted by stars.
     // GitHub Search API supports up to 1000 results via pagination,
     // but for a radar scan the top 100 by stars is sufficient.
-    const response = await client.search.repos({
-      q: query,
-      sort: "stars",
-      order: "desc",
-      per_page: 100,
-    });
+    const response = await withRetry(() =>
+      client.search.repos({
+        q: query,
+        sort: "stars",
+        order: "desc",
+        per_page: 100,
+      })
+    );
 
     for (const repo of response.data.items) {
       candidates.push({

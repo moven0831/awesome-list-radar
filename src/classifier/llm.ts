@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate, ClassifiedCandidate } from "../sources/types";
+import { withRetry } from "../utils/retry";
 
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
@@ -178,14 +179,16 @@ export async function classifyCandidates(
     }
 
     try {
-      const message = await anthropic.messages.create({
-        model: config.classification.model,
-        max_tokens: 512,
-        system: SYSTEM_PROMPT,
-        messages: [
-          { role: "user", content: buildUserPrompt(candidate, config) },
-        ],
-      });
+      const message = await withRetry(() =>
+        anthropic.messages.create({
+          model: config.classification.model,
+          max_tokens: 512,
+          system: SYSTEM_PROMPT,
+          messages: [
+            { role: "user", content: buildUserPrompt(candidate, config) },
+          ],
+        })
+      );
 
       // Track token usage
       const inputTokens = message.usage?.input_tokens ?? 0;

@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import Parser from "rss-parser";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 
@@ -22,7 +23,7 @@ export async function collectBlogs(
   const results = await Promise.allSettled(
     blogs.feeds.map(async (feedUrl) => {
       core.info(`Fetching feed: ${feedUrl}`);
-      return { feedUrl, feed: await rssParser.parseURL(feedUrl) };
+      return { feedUrl, feed: await withRetry(() => rssParser.parseURL(feedUrl)) };
     })
   );
 

@@ -45833,6 +45833,7 @@ exports.extractFirstJson = extractFirstJson;
 exports.sanitize = sanitize;
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
+const retry_1 = __nccwpck_require__(5931);
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
 belongs in the list.
@@ -45962,14 +45963,14 @@ async function classifyCandidates(candidates, config, client) {
             break;
         }
         try {
-            const message = await anthropic.messages.create({
+            const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
                 model: config.classification.model,
                 max_tokens: 512,
                 system: SYSTEM_PROMPT,
                 messages: [
                     { role: "user", content: buildUserPrompt(candidate, config) },
                 ],
-            });
+            }));
             // Track token usage
             const inputTokens = message.usage?.input_tokens ?? 0;
             const outputTokens = message.usage?.output_tokens ?? 0;
@@ -46369,6 +46370,7 @@ exports.buildIssueBody = buildIssueBody;
 exports.escapeTableCell = escapeTableCell;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const retry_1 = __nccwpck_require__(5931);
 function escapeTableCell(value) {
     return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
@@ -46459,7 +46461,7 @@ async function createIssues(candidates, config, dryRun, client) {
     // Fetch existing issues for idempotency check
     let existingIssues = [];
     try {
-        existingIssues = await issueClient.listIssues(labels);
+        existingIssues = await (0, retry_1.withRetry)(() => issueClient.listIssues(labels));
     }
     catch (error) {
         core.warning(`Could not fetch existing issues: ${error instanceof Error ? error.message : String(error)}`);
@@ -46486,7 +46488,7 @@ async function createIssues(candidates, config, dryRun, client) {
             continue;
         }
         try {
-            const issue = await issueClient.createIssue(title, body, labels);
+            const issue = await (0, retry_1.withRetry)(() => issueClient.createIssue(title, body, labels));
             core.info(`Created issue #${issue.number}: ${issue.html_url}`);
             created++;
         }
@@ -46608,6 +46610,7 @@ exports.buildArxivQuery = buildArxivQuery;
 exports.buildArxivUrl = buildArxivUrl;
 const core = __importStar(__nccwpck_require__(7484));
 const fast_xml_parser_1 = __nccwpck_require__(9741);
+const retry_1 = __nccwpck_require__(5931);
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;
 function buildArxivQuery(config) {
@@ -46640,11 +46643,15 @@ async function collectArxiv(config, fetchFn = fetch) {
     const url = buildArxivUrl(query);
     core.info(`arXiv query URL: ${url}`);
     try {
-        const response = await fetchFn(url);
-        if (!response.ok) {
-            core.warning(`arXiv API returned ${response.status}`);
-            return [];
-        }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetchFn(url);
+            if (!res.ok) {
+                throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const xml = await response.text();
         const parser = new fast_xml_parser_1.XMLParser({
             ignoreAttributes: false,
@@ -46726,6 +46733,7 @@ exports.collectBlogs = collectBlogs;
 exports.matchesKeywords = matchesKeywords;
 const core = __importStar(__nccwpck_require__(7484));
 const rss_parser_1 = __importDefault(__nccwpck_require__(4208));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function matchesKeywords(text, keywords) {
     const lower = text.toLowerCase();
@@ -46738,7 +46746,7 @@ async function collectBlogs(config, parser) {
     const blogs = config.sources.blogs;
     const results = await Promise.allSettled(blogs.feeds.map(async (feedUrl) => {
         core.info(`Fetching feed: ${feedUrl}`);
-        return { feedUrl, feed: await rssParser.parseURL(feedUrl) };
+        return { feedUrl, feed: await (0, retry_1.withRetry)(() => rssParser.parseURL(feedUrl)) };
     }));
     const candidates = [];
     for (const result of results) {
@@ -46818,6 +46826,7 @@ exports.buildSearchQuery = buildSearchQuery;
 exports.createdAfterDate = createdAfterDate;
 const rest_1 = __nccwpck_require__(4613);
 const core = __importStar(__nccwpck_require__(7484));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function createdAfterDate(spec) {
     const days = parseInt(spec.replace("d", ""), 10);
@@ -46857,12 +46866,12 @@ async function collectGitHub(config, octokit) {
         // Note: fetches a single page (100 results) sorted by stars.
         // GitHub Search API supports up to 1000 results via pagination,
         // but for a radar scan the top 100 by stars is sufficient.
-        const response = await client.search.repos({
+        const response = await (0, retry_1.withRetry)(() => client.search.repos({
             q: query,
             sort: "stars",
             order: "desc",
             per_page: 100,
-        });
+        }));
         for (const repo of response.data.items) {
             candidates.push({
                 url: repo.html_url,
@@ -46941,6 +46950,7 @@ exports.collectWebPages = collectWebPages;
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
 const blogs_1 = __nccwpck_require__(4731);
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_HTML_LENGTH = 15_000;
 const SYSTEM_PROMPT = `You are an article link extractor. Given the cleaned text of a web page, extract all article or blog post links you can find.
@@ -47008,14 +47018,19 @@ async function collectWebPages(config, fetchFn, client) {
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
     const results = await Promise.allSettled(webPages.urls.map(async (pageUrl) => {
         core.info(`Fetching web page: ${pageUrl}`);
-        const response = await fetcher(pageUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} for ${pageUrl}`);
-        }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetcher(pageUrl);
+            if (!res.ok) {
+                throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const html = await response.text();
         const cleaned = cleanHtml(html);
         core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
-        const message = await anthropic.messages.create({
+        const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
             model: "claude-haiku-4-5-20251001",
             max_tokens: 4096,
             system: SYSTEM_PROMPT,
@@ -47025,7 +47040,7 @@ async function collectWebPages(config, fetchFn, client) {
                     content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
                 },
             ],
-        });
+        }));
         const text = message.content[0].type === "text" ? message.content[0].text : "[]";
         const links = extractFirstJsonArray(text);
         // Resolve relative URLs
@@ -47063,6 +47078,117 @@ async function collectWebPages(config, fetchFn, client) {
         }
     }
     return candidates;
+}
+
+
+/***/ }),
+
+/***/ 5931:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withRetry = withRetry;
+const core = __importStar(__nccwpck_require__(7484));
+function getRetryDelay(attempt, options) {
+    const exponential = options.baseDelay * Math.pow(2, attempt);
+    const jitter = Math.random() * options.baseDelay;
+    return Math.min(exponential + jitter, options.maxDelay);
+}
+function getRateLimitDelay(error) {
+    const headers = error.response?.headers;
+    if (!headers)
+        return null;
+    const retryAfter = headers.get("retry-after");
+    if (retryAfter) {
+        const seconds = parseInt(retryAfter, 10);
+        if (!isNaN(seconds))
+            return seconds * 1000;
+        const date = new Date(retryAfter).getTime();
+        if (!isNaN(date))
+            return Math.max(0, date - Date.now());
+    }
+    const rateLimitReset = headers.get("x-ratelimit-reset");
+    if (rateLimitReset) {
+        const resetTime = parseInt(rateLimitReset, 10) * 1000;
+        return Math.max(0, resetTime - Date.now());
+    }
+    return null;
+}
+function isRetryable(error, retryableStatuses) {
+    if (error instanceof Error) {
+        const retryable = error;
+        const status = retryable.status ?? retryable.response?.status;
+        if (status && retryableStatuses.includes(status))
+            return true;
+        if (retryable.message.includes("ECONNRESET") ||
+            retryable.message.includes("ETIMEDOUT") ||
+            retryable.message.includes("ENOTFOUND") ||
+            retryable.message.includes("fetch failed")) {
+            return true;
+        }
+    }
+    return false;
+}
+async function withRetry(fn, options) {
+    const opts = {
+        maxRetries: options?.maxRetries ?? 3,
+        baseDelay: options?.baseDelay ?? 1000,
+        maxDelay: options?.maxDelay ?? 30000,
+        retryableStatuses: options?.retryableStatuses ?? [
+            408, 429, 500, 502, 503, 504,
+        ],
+    };
+    for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+        try {
+            return await fn();
+        }
+        catch (error) {
+            if (attempt === opts.maxRetries ||
+                !isRetryable(error, opts.retryableStatuses)) {
+                throw error;
+            }
+            const rateLimitDelay = getRateLimitDelay(error);
+            const delay = Math.min(rateLimitDelay ?? getRetryDelay(attempt, opts), opts.maxDelay);
+            core.info(`Retry ${attempt + 1}/${opts.maxRetries} after ${Math.round(delay)}ms: ${error instanceof Error ? error.message : String(error)}`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+    }
+    throw new Error("Unreachable: retry loop exited without return or throw");
 }
 
 

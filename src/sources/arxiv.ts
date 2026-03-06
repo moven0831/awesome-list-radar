@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { XMLParser } from "fast-xml-parser";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -58,11 +59,15 @@ export async function collectArxiv(
   core.info(`arXiv query URL: ${url}`);
 
   try {
-    const response = await fetchFn(url);
-    if (!response.ok) {
-      core.warning(`arXiv API returned ${response.status}`);
-      return [];
-    }
+    const response = await withRetry(async () => {
+      const res = await fetchFn(url);
+      if (!res.ok) {
+        throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+          status: res.status,
+        });
+      }
+      return res;
+    });
 
     const xml = await response.text();
     const parser = new XMLParser({

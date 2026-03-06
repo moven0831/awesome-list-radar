@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import type { RadarConfig } from "../config";
 import type { ClassifiedCandidate } from "../sources/types";
+import { withRetry } from "../utils/retry";
 
 function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -167,7 +168,7 @@ export async function createIssues(
   // Fetch existing issues for idempotency check
   let existingIssues: { title: string; body?: string }[] = [];
   try {
-    existingIssues = await issueClient.listIssues(labels);
+    existingIssues = await withRetry(() => issueClient.listIssues(labels));
   } catch (error) {
     core.warning(
       `Could not fetch existing issues: ${error instanceof Error ? error.message : String(error)}`
@@ -207,7 +208,9 @@ export async function createIssues(
     }
 
     try {
-      const issue = await issueClient.createIssue(title, body, labels);
+      const issue = await withRetry(() =>
+        issueClient.createIssue(title, body, labels)
+      );
       core.info(`Created issue #${issue.number}: ${issue.html_url}`);
       created++;
     } catch (error) {
