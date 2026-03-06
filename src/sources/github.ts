@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/rest";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 
@@ -75,13 +76,13 @@ export async function collectGitHub(
     while (fetched < maxResults) {
       const remaining = maxResults - fetched;
       const perPage = Math.min(remaining, 100);
-      const response = await client.search.repos({
+      const response = await withRetry(() => client.search.repos({
         q: query,
         sort: gh.sort === "best-match" ? undefined : gh.sort,
         order: "desc",
         per_page: perPage,
         page,
-      });
+      }));
 
       for (const repo of response.data.items) {
         if (fetched >= maxResults) break;
