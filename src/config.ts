@@ -104,6 +104,8 @@ export const RadarConfigSchema = z.object({
   description: z.string().min(1),
   list_file: z.string().default("README.md"),
   state_file: z.string().default(".radar-state.json"),
+  provider: z.enum(["anthropic", "openai"]).default("anthropic"),
+  api_base_url: z.string().url().optional(),
   sources: SourcesSchema.refine(
     (s) => s.github || s.arxiv || s.blogs || s.web_pages || s.registries,
     "At least one source must be configured"

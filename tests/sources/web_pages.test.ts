@@ -6,6 +6,7 @@ import {
   resolveUrl,
 } from "../../src/sources/web_pages";
 import type { RadarConfig } from "../../src/config";
+import type { LLMClient } from "../../src/llm/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),
@@ -31,6 +32,13 @@ const baseConfig = {
   },
   issue_template: { labels: ["radar"] },
 } as RadarConfig;
+
+const makeMockLLMClient = (text: string): LLMClient => ({
+  chat: vi.fn().mockResolvedValue({
+    text,
+    usage: { inputTokens: 0, outputTokens: 0 },
+  }),
+});
 
 describe("cleanHtml", () => {
   it("strips script and style tags with content", () => {
@@ -123,18 +131,9 @@ describe("collectWebPages", () => {
         ),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"GPU Proving Post","url":"https://example.com/gpu-proving"},{"title":"Cooking Tips","url":"https://example.com/cooking"}]',
-            },
-          ],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient(
+      '[{"title":"GPU Proving Post","url":"https://example.com/gpu-proving"},{"title":"Cooking Tips","url":"https://example.com/cooking"}]'
+    );
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -168,18 +167,9 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"Post 1","url":"https://example.com/1"},{"title":"Post 2","url":"https://example.com/2"}]',
-            },
-          ],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient(
+      '[{"title":"Post 1","url":"https://example.com/1"},{"title":"Post 2","url":"https://example.com/2"}]'
+    );
 
     const candidates = await collectWebPages(config, mockFetch as any, mockClient);
     expect(candidates).toHaveLength(2);
@@ -190,7 +180,7 @@ describe("collectWebPages", () => {
       .fn()
       .mockRejectedValue(new Error("Network error"));
 
-    const mockClient = { messages: { create: vi.fn() } } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -206,13 +196,9 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi
-          .fn()
-          .mockRejectedValue(new Error("API error")),
-      },
-    } as any;
+    const mockClient: LLMClient = {
+      chat: vi.fn().mockRejectedValue(new Error("API error")),
+    };
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -243,18 +229,9 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [
-            {
-              type: "text",
-              text: '[{"title":"GPU Post","url":"https://example.com/gpu"}]',
-            },
-          ],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient(
+      '[{"title":"GPU Post","url":"https://example.com/gpu"}]'
+    );
 
     const candidates = await collectWebPages(
       config,
@@ -272,7 +249,7 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("Forbidden"),
     });
 
-    const mockClient = { messages: { create: vi.fn() } } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     const candidates = await collectWebPages(
       baseConfig,
@@ -282,7 +259,7 @@ describe("collectWebPages", () => {
     expect(candidates).toEqual([]);
   });
 
-  it("passes custom model to Anthropic API", async () => {
+  it("passes custom model to LLM client", async () => {
     const config = {
       ...baseConfig,
       sources: {
@@ -299,16 +276,10 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     await collectWebPages(config, mockFetch as any, mockClient);
-    expect(mockClient.messages.create).toHaveBeenCalledWith(
+    expect(mockClient.chat).toHaveBeenCalledWith(
       expect.objectContaining({ model: "claude-sonnet-4-6" })
     );
   });
@@ -331,16 +302,10 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     await collectWebPages(config, mockFetch as any, mockClient);
-    expect(mockClient.messages.create).toHaveBeenCalledWith(
+    expect(mockClient.chat).toHaveBeenCalledWith(
       expect.objectContaining({ system: "Custom prompt here" })
     );
   });
@@ -362,13 +327,7 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     await collectWebPages(config, mockFetch as any, mockClient);
     const fetchCall = mockFetch.mock.calls[0];
@@ -394,13 +353,7 @@ describe("collectWebPages", () => {
       text: () => Promise.resolve("<html><body>Content</body></html>"),
     });
 
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockResolvedValue({
-          content: [{ type: "text", text: "[]" }],
-        }),
-      },
-    } as any;
+    const mockClient = makeMockLLMClient("[]");
 
     await collectWebPages(config, mockFetch as any, mockClient);
     const fetchCall = mockFetch.mock.calls[0];

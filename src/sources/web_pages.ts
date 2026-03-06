@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
+import type { LLMClient } from "../llm/types";
 import { matchesKeywords } from "./blogs";
 import { withRetry } from "../utils/retry";
 
@@ -78,16 +78,18 @@ export function resolveUrl(base: string, href: string): string {
 export async function collectWebPages(
   config: RadarConfig,
   fetchFn?: typeof fetch,
-  client?: Anthropic
+  client?: LLMClient
 ): Promise<Candidate[]> {
   if (!config.sources.web_pages) return [];
+  if (!client) {
+    core.warning("collectWebPages: no LLM client provided, skipping web_pages source");
+    return [];
+  }
 
   const webPages = config.sources.web_pages;
   const fetcher = fetchFn ?? fetch;
   const timeout = webPages.request_timeout;
   const userAgent = webPages.user_agent;
-  const anthropic =
-    client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
 
   const results = await Promise.allSettled(
     webPages.urls.map(async (pageUrl) => {
@@ -113,8 +115,8 @@ export async function collectWebPages(
 
       core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
 
-      const message = await withRetry(() =>
-        anthropic.messages.create({
+      const llmResponse = await withRetry(() =>
+        client!.chat({
           model: webPages.model,
           max_tokens: 4096,
           system: webPages.extraction_prompt || SYSTEM_PROMPT,
@@ -127,8 +129,7 @@ export async function collectWebPages(
         })
       );
 
-      const text =
-        message.content[0].type === "text" ? message.content[0].text : "[]";
+      const text = llmResponse.text || "[]";
       const links = extractFirstJsonArray(text);
 
       // Resolve relative URLs

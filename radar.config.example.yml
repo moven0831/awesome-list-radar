@@ -8,6 +8,12 @@ description: >
 
 list_file: README.md
 
+# LLM provider: "anthropic" (default) or "openai".
+# OpenAI-compatible APIs (Groq, Together, Ollama, etc.) use "openai"
+# with a custom api_base_url.
+# provider: openai
+# api_base_url: https://api.groq.com/openai/v1
+
 sources:
   # Search GitHub for new repos by topic, language, stars, and recency.
   github:

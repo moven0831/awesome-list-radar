@@ -17,29 +17,33 @@ import {
   filterSeenCandidates,
   recordCandidates,
 } from "./state";
+import { createLLMClient } from "./llm/factory";
+import type { LLMClient } from "./llm/types";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
-async function collect(config: RadarConfig): Promise<Candidate[]> {
-  const candidates: Candidate[] = [];
+function makeCollect(llmClient: LLMClient) {
+  return async function collect(config: RadarConfig): Promise<Candidate[]> {
+    const candidates: Candidate[] = [];
 
-  if (config.sources.github) {
-    candidates.push(...(await collectGitHub(config)));
-  }
-  if (config.sources.arxiv) {
-    candidates.push(...(await collectArxiv(config)));
-  }
-  if (config.sources.blogs) {
-    candidates.push(...(await collectBlogs(config)));
-  }
-  if (config.sources.web_pages) {
-    candidates.push(...(await collectWebPages(config)));
-  }
-  if (config.sources.registries) {
-    candidates.push(...(await collectRegistries(config)));
-  }
+    if (config.sources.github) {
+      candidates.push(...(await collectGitHub(config)));
+    }
+    if (config.sources.arxiv) {
+      candidates.push(...(await collectArxiv(config)));
+    }
+    if (config.sources.blogs) {
+      candidates.push(...(await collectBlogs(config)));
+    }
+    if (config.sources.web_pages) {
+      candidates.push(...(await collectWebPages(config, undefined, llmClient)));
+    }
+    if (config.sources.registries) {
+      candidates.push(...(await collectRegistries(config)));
+    }
 
-  return candidates;
+    return candidates;
+  };
 }
 
 async function run(): Promise<void> {
@@ -50,6 +54,30 @@ async function run(): Promise<void> {
     core.info(`Loading config from ${configPath}`);
     const config = loadConfig(configPath);
 
+    // Construct provider-agnostic LLM client
+    const provider = config.provider;
+    const apiKey =
+      provider === "openai"
+        ? core.getInput("openai_api_key")
+        : core.getInput("anthropic_api_key");
+
+    if (!apiKey) {
+      throw new Error(
+        `Missing API key: ${provider === "openai" ? "openai_api_key" : "anthropic_api_key"} input is required for provider "${provider}"`
+      );
+    }
+
+    const rawBaseURL = core.getInput("api_base_url") || config.api_base_url;
+    if (rawBaseURL) {
+      try {
+        new URL(rawBaseURL);
+      } catch {
+        throw new Error(`Invalid api_base_url: "${rawBaseURL}" is not a valid URL`);
+      }
+    }
+    const baseURL = rawBaseURL;
+    const llmClient = createLLMClient(provider, apiKey, baseURL);
+
     // Load state
     const state = loadState(config.state_file);
 
@@ -58,7 +86,7 @@ async function run(): Promise<void> {
       result = await runPipeline(
         config,
         {
-          collect,
+          collect: makeCollect(llmClient),
           filter: async (candidates, cfg) => {
             // First filter out already-seen candidates
             const unseen = filterSeenCandidates(candidates, state);
@@ -76,7 +104,7 @@ async function run(): Promise<void> {
             return metadataResult;
           },
           classify: async (candidates, cfg) => {
-            const classified = await classifyCandidates(candidates, cfg);
+            const classified = await classifyCandidates(candidates, cfg, llmClient);
 
             // Record accepted (classified) and rejected (below threshold) candidates
             const classifiedUrls = new Set(classified.map((c) => c.url));
