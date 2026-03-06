@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "f46dae928d67",
+  "strategy": "manual-commit",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/classifier/llm.test.ts",
+    "tests/config.test.ts",
+    "tests/llm/providers.test.ts",
+    "tests/sources/web_pages.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f4/6dae928d67/0/metadata.json",
+      "transcript": "/f4/6dae928d67/0/full.jsonl",
+      "context": "/f4/6dae928d67/0/context.md",
+      "content_hash": "/f4/6dae928d67/0/content_hash.txt",
+      "prompt": "/f4/6dae928d67/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 5,
+    "cache_creation_tokens": 12638,
+    "cache_read_tokens": 389795,
+    "output_tokens": 5380,
+    "api_call_count": 5
+  }
+}

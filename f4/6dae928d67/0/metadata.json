@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "f46dae928d67",
+  "session_id": "5fb2782e-7a76-42d5-87ce-3068969aec75",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T13:17:40.60335Z",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/classifier/llm.test.ts",
+    "tests/config.test.ts",
+    "tests/llm/providers.test.ts",
+    "tests/sources/web_pages.test.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "fcc9072858c3",
+  "checkpoint_transcript_start": 232,
+  "transcript_lines_at_start": 232,
+  "token_usage": {
+    "input_tokens": 5,
+    "cache_creation_tokens": 12638,
+    "cache_read_tokens": 389795,
+    "output_tokens": 5380,
+    "api_call_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T13:17:40.203092Z",
+    "agent_lines": 264,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 264,
+    "agent_percentage": 100
+  }
+}
