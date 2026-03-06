@@ -91,10 +91,15 @@ export async function collectWebPages(
     webPages.urls.map(async (pageUrl) => {
       core.info(`Fetching web page: ${pageUrl}`);
 
-      const response = await withRetry(() => fetcher(pageUrl));
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${pageUrl}`);
-      }
+      const response = await withRetry(async () => {
+        const res = await fetcher(pageUrl);
+        if (!res.ok) {
+          throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
+            status: res.status,
+          });
+        }
+        return res;
+      });
       const html = await response.text();
       const cleaned = cleanHtml(html);
 

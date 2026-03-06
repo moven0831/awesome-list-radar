@@ -110,6 +110,31 @@ describe("buildIssueBody", () => {
     expect(body).not.toContain("Tags");
   });
 
+  it("includes new metadata table rows when fields are present", () => {
+    const candidate: ClassifiedCandidate = {
+      ...mockClassified,
+      metadata: {
+        stars: 42,
+        language: "Rust",
+        topics: ["gpu"],
+        license: "MIT",
+        archived: false,
+        fork: true,
+        owner: "testorg",
+        homepage: "https://example.com",
+        lastPushedAt: "2025-01-15T00:00:00Z",
+      },
+    };
+
+    const body = buildIssueBody(candidate);
+    expect(body).toContain("| **License** | MIT |");
+    expect(body).toContain("| **Archived** | No |");
+    expect(body).toContain("| **Fork** | Yes |");
+    expect(body).toContain("| **Owner** | testorg |");
+    expect(body).toContain("| **Homepage** | https://example.com |");
+    expect(body).toContain("| **Last Pushed** | 2025-01-15T00:00:00Z |");
+  });
+
   it("escapes pipe characters in table cells", () => {
     const candidate: ClassifiedCandidate = {
       ...mockClassified,

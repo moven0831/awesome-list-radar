@@ -147,6 +147,40 @@ describe("buildUserPrompt", () => {
     expect(prompt).not.toContain("candidate_stars");
     expect(prompt).not.toContain("candidate_language");
     expect(prompt).toContain("<candidate_authors>Alice</candidate_authors>");
+    expect(prompt).not.toContain("candidate_license");
+    expect(prompt).not.toContain("candidate_archived");
+    expect(prompt).not.toContain("candidate_fork");
+    expect(prompt).not.toContain("candidate_owner");
+    expect(prompt).not.toContain("candidate_homepage");
+    expect(prompt).not.toContain("candidate_last_commit");
+  });
+
+  it("includes new metadata XML tags when fields are present", () => {
+    const candidate: Candidate = {
+      url: "https://github.com/test/repo",
+      title: "test/repo",
+      description: "A library",
+      source: "github",
+      metadata: {
+        stars: 100,
+        language: "Rust",
+        topics: ["gpu"],
+        license: "Apache-2.0",
+        archived: false,
+        fork: true,
+        owner: "testorg",
+        homepage: "https://example.com",
+        lastPushedAt: "2025-01-15T00:00:00Z",
+      },
+    };
+
+    const prompt = buildUserPrompt(candidate, baseConfig);
+    expect(prompt).toContain("<candidate_license>Apache-2.0</candidate_license>");
+    expect(prompt).toContain("<candidate_archived>false</candidate_archived>");
+    expect(prompt).toContain("<candidate_fork>true</candidate_fork>");
+    expect(prompt).toContain("<candidate_owner>testorg</candidate_owner>");
+    expect(prompt).toContain("<candidate_homepage>https://example.com</candidate_homepage>");
+    expect(prompt).toContain("<candidate_last_pushed>2025-01-15T00:00:00Z</candidate_last_pushed>");
   });
 });
 

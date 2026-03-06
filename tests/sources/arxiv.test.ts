@@ -132,7 +132,7 @@ describe("collectArxiv", () => {
   it("handles API errors gracefully", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: false,
-      status: 503,
+      status: 404,
     });
 
     const candidates = await collectArxiv(baseConfig, mockFetch as any);

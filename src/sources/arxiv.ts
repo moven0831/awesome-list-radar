@@ -59,11 +59,15 @@ export async function collectArxiv(
   core.info(`arXiv query URL: ${url}`);
 
   try {
-    const response = await withRetry(() => fetchFn(url));
-    if (!response.ok) {
-      core.warning(`arXiv API returned ${response.status}`);
-      return [];
-    }
+    const response = await withRetry(async () => {
+      const res = await fetchFn(url);
+      if (!res.ok) {
+        throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+          status: res.status,
+        });
+      }
+      return res;
+    });
 
     const xml = await response.text();
     const parser = new XMLParser({

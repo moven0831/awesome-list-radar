@@ -78,14 +78,10 @@ export async function withRetry<T>(
     ],
   };
 
-  let lastError: unknown;
-
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
-      lastError = error;
-
       if (
         attempt === opts.maxRetries ||
         !isRetryable(error, opts.retryableStatuses)
@@ -94,7 +90,10 @@ export async function withRetry<T>(
       }
 
       const rateLimitDelay = getRateLimitDelay(error as RetryableError);
-      const delay = rateLimitDelay ?? getRetryDelay(attempt, opts);
+      const delay = Math.min(
+        rateLimitDelay ?? getRetryDelay(attempt, opts),
+        opts.maxDelay
+      );
 
       core.info(
         `Retry ${attempt + 1}/${opts.maxRetries} after ${Math.round(delay)}ms: ${error instanceof Error ? error.message : String(error)}`
@@ -104,5 +103,5 @@ export async function withRetry<T>(
     }
   }
 
-  throw lastError;
+  throw new Error("Unreachable: retry loop exited without return or throw");
 }
