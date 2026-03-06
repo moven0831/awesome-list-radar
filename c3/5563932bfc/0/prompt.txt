@@ -1,0 +1,64 @@
+Implement the following plan:
+
+# Plan: Verify Greptile Reviews & Squash-Merge PRs #22 and #24
+
+## Context
+PRs #22 (registry sources) and #24 (incremental state) are the last 2 open PRs. Greptile reviews show unaddressed comments, but code exploration indicates all issues have already been fixed. Need to verify fixes, then squash-merge both into main.
+
+## Greptile Review Status
+
+### PR #22 — feat: package registry sources (4 comments)
+| # | Issue | Status |
+|---|-------|--------|
+| 1 | Double-encoded `+` in npm search | **Fixed** — uses `.join(" ")` |
+| 2 | Double-encoded `+` in crates.io search | **Fixed** — uses `.join(" ")` |
+| 3 | `min_downloads` ignored for npm | **Fixed** — filtering code exists |
+| 4 | PyPI keywords = exact package names | **By design** — PyPI lacks search API |
+
+### PR #24 — feat: incremental state (3 comments)
+| # | Issue | Status |
+|---|-------|--------|
+| 1 | Misleading log for corrupt state files | **Fixed** — separate handling per error type |
+| 2 | Shared `EMPTY_STATE` reference leak | **Fixed** — fresh objects returned inline |
+| 3 | State not persisted on failure | **Fixed** — `saveState` in `finally` block |
+
+## Execution Plan
+
+### Step 1: Verify fixes on each branch
+- Read `src/sources/registry.ts` on feat/12-registry-sources branch
+- Read `src/state.ts` and `src/index.ts` on feat/14-incremental-state branch
+- Confirm each Greptile comment is addressed
+
+### Step 2: Check CI is green
+- `gh pr checks 22` and `gh pr checks 24`
+
+### Step 3: Squash-merge PR #22
+- `gh pr merge 22 --squash --delete-branch`
+
+### Step 4: Update PR #24 branch, then squash-merge
+- Update branch: `gh pr update-branch 24` or rebase
+- Wait for CI to pass
+- `gh pr merge 24 --squash --delete-branch`
+
+### Step 5: Clean up
+- Delete local tracking branches
+- `git pull` on main
+
+## Verification
+- `git log --oneline -5` on main confirms both merges
+- `npm test && npm run build` on main confirms everything works
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/moventsai/.claude/projects/-Users-moventsai-Projects-mine-awesome-list-radar/8a2bdec3-897e-446c-b6c5-389af5aca336.jsonl
+
+---
+
+Tool loaded.
+
+---
+
+sure
+
+---
+
+Tool loaded.
