@@ -23,7 +23,6 @@ export function normalizeUrl(url: string): string {
     // Reconstruct without protocol
     normalized = parsed.hostname + parsed.pathname + parsed.search;
     normalized = normalized.replace(/\/+$/, "");
-    if (parsed.search === "?") normalized = normalized.replace(/\?$/, "");
   } catch {
     // If URL parsing fails, just use the lowercase version
   }

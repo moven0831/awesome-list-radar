@@ -107,8 +107,8 @@ describe("filterByMetadata", () => {
     old.setDate(old.getDate() - 60);
 
     const candidates = [
-      makeCand({ metadata: { lastCommitAt: recent.toISOString() } }),
-      makeCand({ metadata: { lastCommitAt: old.toISOString() } }),
+      makeCand({ metadata: { lastPushedAt: recent.toISOString() } }),
+      makeCand({ metadata: { lastPushedAt: old.toISOString() } }),
       makeCand({ metadata: { publishedAt: recent.toISOString() } }),
       makeCand({ metadata: { publishedAt: old.toISOString() } }),
     ];
@@ -117,7 +117,7 @@ describe("filterByMetadata", () => {
     expect(result).toHaveLength(2);
   });
 
-  it("prefers lastCommitAt over publishedAt for age check", () => {
+  it("prefers lastPushedAt over publishedAt for age check", () => {
     const config = {
       ...baseConfig,
       filter: { ...baseConfig.filter, max_age_days: 30 },
@@ -131,7 +131,7 @@ describe("filterByMetadata", () => {
     const candidates = [
       makeCand({
         metadata: {
-          lastCommitAt: recent.toISOString(),
+          lastPushedAt: recent.toISOString(),
           publishedAt: old.toISOString(),
         },
       }),

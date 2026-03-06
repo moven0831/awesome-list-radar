@@ -28,7 +28,7 @@ function matchesAnyKeyword(text: string, keywords: string[]): boolean {
 
 function matchesAllKeywords(text: string, keywords: string[]): boolean {
   const lower = text.toLowerCase();
-  return keywords.every((kw) => lower.includes(kw.toLowerCase()));
+  return keywords.every((kw) => lower.includes(kw));
 }
 
 function getSearchText(c: Candidate): string {
@@ -43,7 +43,7 @@ export function filterCandidates(
   const includeKeywords =
     config.filter?.include?.map((kw) => kw.toLowerCase()) ??
     getAllKeywords(config);
-  const requireAllKeywords = config.filter?.require_all ?? [];
+  const requireAllKeywords = (config.filter?.require_all ?? []).map((kw) => kw.toLowerCase());
   const excludeKeywords =
     config.filter?.exclude?.map((kw) => kw.toLowerCase()) ?? [];
 

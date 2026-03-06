@@ -13,7 +13,7 @@ export function filterByMetadata(
     if (filter.exclude_archived && c.metadata.archived === true) return false;
     if (filter.require_license && !c.metadata.license) return false;
     if (filter.max_age_days) {
-      const dateField = c.metadata.lastCommitAt || c.metadata.publishedAt;
+      const dateField = c.metadata.lastPushedAt || c.metadata.publishedAt;
       if (dateField) {
         const age =
           (Date.now() - new Date(dateField).getTime()) / (1000 * 60 * 60 * 24);
