@@ -45831,8 +45831,11 @@ exports.buildUserPrompt = buildUserPrompt;
 exports.parseClassifyResponse = parseClassifyResponse;
 exports.extractFirstJson = extractFirstJson;
 exports.sanitize = sanitize;
+exports.loadCategoryTree = loadCategoryTree;
+const node_fs_1 = __nccwpck_require__(3024);
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
+const parse_list_1 = __nccwpck_require__(2953);
 const retry_1 = __nccwpck_require__(5931);
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
@@ -45853,17 +45856,16 @@ exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
 function sanitize(text, maxLength) {
     return text.slice(0, maxLength).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
-function buildUserPrompt(candidate, config) {
+function buildUserPrompt(candidate, config, categoryTree) {
+    const maxDescLen = config.classification.max_description_length;
     const parts = [
         `## List Description`,
         config.description,
-        ``,
-        `## Candidate`,
-        `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`,
-        `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`,
-        `<candidate_source>${candidate.source}</candidate_source>`,
-        `<candidate_description>${sanitize(candidate.description, 500)}</candidate_description>`,
     ];
+    if (config.classification.context) {
+        parts.push(``, `## Additional Context`, config.classification.context);
+    }
+    parts.push(``, `## Candidate`, `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`, `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`, `<candidate_source>${candidate.source}</candidate_source>`, `<candidate_description>${sanitize(candidate.description, maxDescLen)}</candidate_description>`);
     if (candidate.metadata.stars !== undefined) {
         parts.push(`<candidate_stars>${candidate.metadata.stars}</candidate_stars>`);
     }
@@ -45894,8 +45896,29 @@ function buildUserPrompt(candidate, config) {
     if (candidate.metadata.lastPushedAt) {
         parts.push(`<candidate_last_pushed>${sanitize(candidate.metadata.lastPushedAt, 50)}</candidate_last_pushed>`);
     }
+    if (categoryTree) {
+        parts.push(``, `## Available Categories`, categoryTree, ``, `Pick the most appropriate category from the list above.`);
+    }
     parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
     return parts.join("\n");
+}
+function loadCategoryTree(config) {
+    // Explicit categories take priority
+    if (config.classification.categories?.length) {
+        return config.classification.categories.map((c) => `- ${c}`).join("\n");
+    }
+    // Auto-extract from list file
+    try {
+        const content = (0, node_fs_1.readFileSync)(config.list_file, "utf-8");
+        const nodes = (0, parse_list_1.extractCategories)(content);
+        if (nodes.length === 0)
+            return undefined;
+        return (0, parse_list_1.formatCategoryTree)(nodes);
+    }
+    catch {
+        // File doesn't exist or can't be read — skip gracefully
+        return undefined;
+    }
 }
 function extractFirstJson(text) {
     const start = text.indexOf("{");
@@ -45953,6 +45976,8 @@ async function classifyCandidates(candidates, config, client) {
     const maxBudget = config.classification.max_budget_usd;
     const toClassify = candidates.slice(0, maxClassifications);
     const classified = [];
+    const systemPrompt = config.classification.system_prompt ?? SYSTEM_PROMPT;
+    const categoryTree = loadCategoryTree(config);
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalCost = 0;
@@ -45966,9 +45991,12 @@ async function classifyCandidates(candidates, config, client) {
             const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
                 model: config.classification.model,
                 max_tokens: 512,
-                system: SYSTEM_PROMPT,
+                system: systemPrompt,
                 messages: [
-                    { role: "user", content: buildUserPrompt(candidate, config) },
+                    {
+                        role: "user",
+                        content: buildUserPrompt(candidate, config, categoryTree),
+                    },
                 ],
             }));
             // Track token usage
@@ -46078,6 +46106,10 @@ const ClassificationSchema = zod_1.z.object({
     max_classifications_per_run: zod_1.z.number().int().positive().optional(),
     max_issues_per_run: zod_1.z.number().int().positive().optional(), // deprecated alias
     max_budget_usd: zod_1.z.number().positive().optional(),
+    system_prompt: zod_1.z.string().optional(),
+    context: zod_1.z.string().optional(),
+    max_description_length: zod_1.z.number().int().positive().max(10000).default(500),
+    categories: zod_1.z.array(zod_1.z.string()).optional(),
 }).transform((val) => ({
     ...val,
     max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
@@ -47291,6 +47323,60 @@ async function collectWebPages(config, fetchFn, client) {
         }
     }
     return candidates;
+}
+
+
+/***/ }),
+
+/***/ 2953:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.extractCategories = extractCategories;
+exports.formatCategoryTree = formatCategoryTree;
+function extractCategories(markdown) {
+    const lines = markdown.split("\n");
+    const root = [];
+    const stack = [];
+    for (const line of lines) {
+        const match = line.match(/^(#{2,3})\s+(.+)/);
+        if (!match)
+            continue;
+        const level = match[1].length; // 2 or 3
+        const name = match[2]
+            .replace(/!?\[.*?\]\(.*?\)/g, "") // [text](url) and ![alt](url)
+            .replace(/<!--.*?-->/g, "") // HTML comments
+            .replace(/\{#[^}]+\}/g, "") // {#anchor-id}
+            .trim();
+        if (!name)
+            continue;
+        const node = { name, level, children: [] };
+        // Pop stack until we find parent
+        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+            stack.pop();
+        }
+        if (stack.length === 0) {
+            root.push(node);
+        }
+        else {
+            stack[stack.length - 1].node.children.push(node);
+        }
+        stack.push({ node, level });
+    }
+    return root;
+}
+function formatCategoryTree(nodes, indent = 0) {
+    return nodes
+        .map((node) => {
+        const prefix = "  ".repeat(indent) + "- ";
+        const children = node.children.length > 0
+            ? "\n" + formatCategoryTree(node.children, indent + 1)
+            : "";
+        return prefix + node.name + children;
+    })
+        .join("\n");
 }
 
 
