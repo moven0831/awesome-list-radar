@@ -500,4 +500,59 @@ sources:
 `)
     ).toThrow();
   });
+
+  it("defaults provider to anthropic when not specified", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.provider).toBe("anthropic");
+  });
+
+  it("accepts provider: openai", () => {
+    const config = parseConfig(`
+description: test
+provider: openai
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.provider).toBe("openai");
+  });
+
+  it("rejects invalid provider", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+provider: gemini
+sources:
+  github:
+    topics: [test]
+`)
+    ).toThrow();
+  });
+
+  it("accepts api_base_url", () => {
+    const config = parseConfig(`
+description: test
+provider: openai
+api_base_url: https://api.groq.com/openai/v1
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.api_base_url).toBe("https://api.groq.com/openai/v1");
+  });
+
+  it("allows api_base_url to be omitted", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.api_base_url).toBeUndefined();
+  });
 });

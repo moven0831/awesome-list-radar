@@ -11,8 +11,14 @@ inputs:
     description: 'GitHub token for API access and issue creation'
     required: true
   anthropic_api_key:
-    description: 'Anthropic API key for LLM-based relevance scoring'
-    required: true
+    description: 'Anthropic API key for LLM-based relevance scoring (required if provider is anthropic)'
+    required: false
+  openai_api_key:
+    description: 'OpenAI API key for LLM-based relevance scoring (required if provider is openai)'
+    required: false
+  api_base_url:
+    description: 'Custom base URL for OpenAI-compatible APIs (e.g. Groq, Together, Ollama)'
+    required: false
   dry_run:
     description: 'If true, log candidates without creating issues'
     required: false

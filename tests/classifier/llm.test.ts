@@ -12,6 +12,7 @@ import {
 } from "../../src/classifier/llm";
 import type { RadarConfig } from "../../src/config";
 import type { Candidate } from "../../src/sources/types";
+import type { LLMClient } from "../../src/llm/types";
 
 vi.mock("@actions/core", () => ({
   info: vi.fn(),
@@ -245,15 +246,14 @@ describe("buildUserPrompt", () => {
 });
 
 describe("classifyCandidates", () => {
-  const makeMockClient = (responses: string[]) => {
+  const makeMockClient = (responses: string[], usage?: { inputTokens: number; outputTokens: number }): LLMClient => {
     let callIndex = 0;
     return {
-      messages: {
-        create: vi.fn().mockImplementation(async () => ({
-          content: [{ type: "text", text: responses[callIndex++] }],
-        })),
-      },
-    } as any;
+      chat: vi.fn().mockImplementation(async () => ({
+        text: responses[callIndex++] ?? "",
+        usage: usage ?? { inputTokens: 0, outputTokens: 0 },
+      })),
+    };
   };
 
   it("classifies candidates above threshold", async () => {
@@ -301,26 +301,20 @@ describe("classifyCandidates", () => {
 
     const result = await classifyCandidates(candidates, config, client);
 
-    expect(client.messages.create).toHaveBeenCalledTimes(2);
+    expect(client.chat).toHaveBeenCalledTimes(2);
     expect(result).toHaveLength(2);
   });
 
   it("handles API errors gracefully per-candidate", async () => {
-    const client = {
-      messages: {
-        create: vi
-          .fn()
-          .mockRejectedValueOnce(new Error("rate limited"))
-          .mockResolvedValueOnce({
-            content: [
-              {
-                type: "text",
-                text: '{"relevanceScore": 80, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
-              },
-            ],
-          }),
-      },
-    } as any;
+    const client: LLMClient = {
+      chat: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("rate limited"))
+        .mockResolvedValueOnce({
+          text: '{"relevanceScore": 80, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
+          usage: { inputTokens: 0, outputTokens: 0 },
+        }),
+    };
 
     const result = await classifyCandidates(
       [mockCandidate, mockCandidate],
@@ -333,7 +327,8 @@ describe("classifyCandidates", () => {
   });
 
   it("returns empty array for empty candidates", async () => {
-    const result = await classifyCandidates([], baseConfig);
+    const client = makeMockClient([]);
+    const result = await classifyCandidates([], baseConfig, client);
     expect(result).toEqual([]);
   });
 
@@ -347,22 +342,13 @@ describe("classifyCandidates", () => {
       },
     } as RadarConfig;
 
-    const client = {
-      messages: {
-        create: vi.fn().mockResolvedValueOnce({
-          content: [
-            {
-              type: "text",
-              text: '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
-            },
-          ],
-        }),
-      },
-    } as any;
+    const client = makeMockClient([
+      '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
+    ]);
 
     await classifyCandidates([mockCandidate], config, client);
 
-    expect(client.messages.create).toHaveBeenCalledWith(
+    expect(client.chat).toHaveBeenCalledWith(
       expect.objectContaining({
         system: customPrompt,
       })
@@ -370,22 +356,13 @@ describe("classifyCandidates", () => {
   });
 
   it("uses default SYSTEM_PROMPT when no custom prompt configured", async () => {
-    const client = {
-      messages: {
-        create: vi.fn().mockResolvedValueOnce({
-          content: [
-            {
-              type: "text",
-              text: '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
-            },
-          ],
-        }),
-      },
-    } as any;
+    const client = makeMockClient([
+      '{"relevanceScore": 85, "suggestedCategory": "Tools", "suggestedTags": [], "reasoning": "ok"}',
+    ]);
 
     await classifyCandidates([mockCandidate], baseConfig, client);
 
-    expect(client.messages.create).toHaveBeenCalledWith(
+    expect(client.chat).toHaveBeenCalledWith(
       expect.objectContaining({
         system: SYSTEM_PROMPT,
       })
@@ -393,14 +370,13 @@ describe("classifyCandidates", () => {
   });
 
   it("tracks token usage across calls", async () => {
-    const client = {
-      messages: {
-        create: vi.fn().mockImplementation(async () => ({
-          content: [{ type: "text", text: '{"relevanceScore": 85, "suggestedCategory": "A", "suggestedTags": [], "reasoning": ""}' }],
-          usage: { input_tokens: 500, output_tokens: 100 },
-        })),
-      },
-    } as any;
+    const client = makeMockClient(
+      [
+        '{"relevanceScore": 85, "suggestedCategory": "A", "suggestedTags": [], "reasoning": ""}',
+        '{"relevanceScore": 85, "suggestedCategory": "A", "suggestedTags": [], "reasoning": ""}',
+      ],
+      { inputTokens: 500, outputTokens: 100 }
+    );
 
     const { info } = await import("@actions/core");
     await classifyCandidates([mockCandidate, mockCandidate], baseConfig, client);
@@ -420,21 +396,17 @@ describe("classifyCandidates", () => {
       },
     } as RadarConfig;
 
-    const client = {
-      messages: {
-        create: vi.fn().mockImplementation(async () => ({
-          content: [{ type: "text", text: '{"relevanceScore": 85, "suggestedCategory": "A", "suggestedTags": [], "reasoning": ""}' }],
-          usage: { input_tokens: 500, output_tokens: 100 },
-        })),
-      },
-    } as any;
+    const client = makeMockClient(
+      Array(5).fill('{"relevanceScore": 85, "suggestedCategory": "A", "suggestedTags": [], "reasoning": ""}'),
+      { inputTokens: 500, outputTokens: 100 }
+    );
 
     const candidates = Array(5).fill(mockCandidate);
     const result = await classifyCandidates(candidates, config, client);
 
     // With sonnet pricing: (500*3 + 100*15)/1M = 0.003 per call
     // Budget is 0.001 so after 1st call (cost 0.003 >= 0.001) it should stop
-    expect(client.messages.create).toHaveBeenCalledTimes(1);
+    expect(client.chat).toHaveBeenCalledTimes(1);
     expect(result).toHaveLength(1);
   });
 });
@@ -466,5 +438,7 @@ describe("MODEL_PRICING", () => {
     expect(MODEL_PRICING["claude-sonnet-4-6"]).toBeDefined();
     expect(MODEL_PRICING["claude-haiku-4-5-20251001"]).toBeDefined();
     expect(MODEL_PRICING["claude-opus-4-6"]).toBeDefined();
+    expect(MODEL_PRICING["gpt-4o"]).toBeDefined();
+    expect(MODEL_PRICING["gpt-4o-mini"]).toBeDefined();
   });
 });

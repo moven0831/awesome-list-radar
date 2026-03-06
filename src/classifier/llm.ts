@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
-import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate, ClassifiedCandidate } from "../sources/types";
+import type { LLMClient } from "../llm/types";
 import {
   extractCategories,
   formatCategoryTree,
 } from "../utils/parse_list";
 import { withRetry } from "../utils/retry";
+import { MODEL_PRICING, estimateCost } from "../llm/pricing";
 
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
@@ -175,24 +176,7 @@ function parseClassifyResponse(text: string): ClassifyResult {
   };
 }
 
-export const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
-  "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
-  "claude-haiku-4-5-20251001": { inputPer1M: 0.8, outputPer1M: 4.0 },
-  "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
-};
-
-export function estimateCost(
-  inputTokens: number,
-  outputTokens: number,
-  model: string
-): number {
-  const pricing = MODEL_PRICING[model];
-  if (!pricing) {
-    core.warning(`No pricing found for model "${model}"; falling back to claude-sonnet-4-6 pricing. Cost estimates may be inaccurate.`);
-  }
-  const effectivePricing = pricing ?? MODEL_PRICING["claude-sonnet-4-6"];
-  return (inputTokens * effectivePricing.inputPer1M + outputTokens * effectivePricing.outputPer1M) / 1_000_000;
-}
+export { MODEL_PRICING, estimateCost };
 
 // Caps the number of LLM API calls per run. Candidates beyond this
 // limit are not classified. This controls API cost, not the final
@@ -200,12 +184,9 @@ export function estimateCost(
 export async function classifyCandidates(
   candidates: Candidate[],
   config: RadarConfig,
-  client?: Anthropic
+  client: LLMClient
 ): Promise<ClassifiedCandidate[]> {
   if (candidates.length === 0) return [];
-
-  const anthropic =
-    client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
 
   const maxClassifications = config.classification.max_classifications_per_run;
   const maxBudget = config.classification.max_budget_usd;
@@ -226,8 +207,8 @@ export async function classifyCandidates(
     }
 
     try {
-      const message = await withRetry(() =>
-        anthropic.messages.create({
+      const response = await withRetry(() =>
+        client.chat({
           model: config.classification.model,
           max_tokens: 512,
           system: systemPrompt,
@@ -241,8 +222,8 @@ export async function classifyCandidates(
       );
 
       // Track token usage
-      const inputTokens = message.usage?.input_tokens ?? 0;
-      const outputTokens = message.usage?.output_tokens ?? 0;
+      const inputTokens = response.usage.inputTokens;
+      const outputTokens = response.usage.outputTokens;
       const cost = estimateCost(inputTokens, outputTokens, config.classification.model);
 
       totalInputTokens += inputTokens;
@@ -251,10 +232,7 @@ export async function classifyCandidates(
 
       core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
 
-
-      const text =
-        message.content[0].type === "text" ? message.content[0].text : "";
-      const result = parseClassifyResponse(text);
+      const result = parseClassifyResponse(response.text);
 
       if (result.relevanceScore >= config.classification.threshold) {
         classified.push({ ...candidate, ...result });
