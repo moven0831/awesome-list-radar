@@ -2,48 +2,59 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import type { RadarConfig } from "../config";
 import type { ClassifiedCandidate } from "../sources/types";
+import { withRetry } from "../utils/retry";
 
 function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
-function buildIssueTitle(candidate: ClassifiedCandidate): string {
-  return `[Radar] ${escapeTableCell(candidate.title).slice(0, 200)}`;
+function buildIssueTitle(candidate: ClassifiedCandidate, config: RadarConfig): string {
+  const prefix = config.issue_template.title_prefix;
+  return `${prefix} ${escapeTableCell(candidate.title).slice(0, 200)}`;
 }
 
-function buildIssueBody(candidate: ClassifiedCandidate): string {
+function renderTemplate(template: string, candidate: ClassifiedCandidate): string {
+  return template
+    .replace(/\{\{name\}\}/g, candidate.title)
+    .replace(/\{\{url\}\}/g, candidate.url)
+    .replace(/\{\{description\}\}/g, candidate.description.slice(0, 100))
+    .replace(/\{\{language\}\}/g, candidate.metadata.language ?? "")
+    .replace(/\{\{stars\}\}/g, String(candidate.metadata.stars ?? ""))
+    .replace(/\{\{license\}\}/g, String((candidate.metadata as Record<string, unknown>).license ?? ""))
+    .replace(/\{\{source\}\}/g, candidate.source)
+    .replace(/\{\{category\}\}/g, candidate.suggestedCategory);
+}
+
+function buildIssueBody(candidate: ClassifiedCandidate, config: RadarConfig): string {
   const lines = [
     `## Candidate Resource`,
     ``,
     `| Field | Value |`,
     `|-------|-------|`,
-    `| **URL** | ${escapeTableCell(candidate.url)} |`,
-    `| **Source** | ${escapeTableCell(candidate.source)} |`,
-    `| **Relevance Score** | ${candidate.relevanceScore}/100 |`,
-    `| **Suggested Category** | ${escapeTableCell(candidate.suggestedCategory)} |`,
   ];
 
-  if (candidate.suggestedTags.length > 0) {
-    lines.push(
-      `| **Tags** | ${candidate.suggestedTags.map((t) => `\`${escapeTableCell(t)}\``).join(", ")} |`
-    );
+  const allFields: Record<string, () => string | null> = {
+    url: () => `| **URL** | ${escapeTableCell(candidate.url)} |`,
+    source: () => `| **Source** | ${escapeTableCell(candidate.source)} |`,
+    relevanceScore: () => `| **Relevance Score** | ${candidate.relevanceScore}/100 |`,
+    suggestedCategory: () => `| **Suggested Category** | ${escapeTableCell(candidate.suggestedCategory)} |`,
+    tags: () => candidate.suggestedTags.length > 0 ? `| **Tags** | ${candidate.suggestedTags.map((t) => `\`${escapeTableCell(t)}\``).join(", ")} |` : null,
+    stars: () => candidate.metadata.stars !== undefined ? `| **Stars** | ${candidate.metadata.stars} |` : null,
+    language: () => candidate.metadata.language ? `| **Language** | ${escapeTableCell(candidate.metadata.language)} |` : null,
+    authors: () => candidate.metadata.authors?.length ? `| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |` : null,
+  };
+
+  const fieldsToShow = config.issue_template.include_fields ?? Object.keys(allFields);
+  for (const field of fieldsToShow) {
+    if (allFields[field]) {
+      const row = allFields[field]();
+      if (row) lines.push(row);
+    }
   }
 
-  if (candidate.metadata.stars !== undefined) {
-    lines.push(`| **Stars** | ${candidate.metadata.stars} |`);
-  }
-
-  if (candidate.metadata.language) {
-    lines.push(
-      `| **Language** | ${escapeTableCell(candidate.metadata.language)} |`
-    );
-  }
-
-  if (candidate.metadata.authors?.length) {
-    lines.push(
-      `| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |`
-    );
-  }
+  const suggestedEntry = config.issue_template.suggested_entry_format
+    ? renderTemplate(config.issue_template.suggested_entry_format, candidate)
+    : `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`;
 
   if (candidate.metadata.license) {
     lines.push(
@@ -98,7 +109,7 @@ function buildIssueBody(candidate: ClassifiedCandidate): string {
     `## Suggested Entry`,
     ``,
     `\`\`\`markdown`,
-    `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`,
+    suggestedEntry,
     `\`\`\``,
     ``,
     `---`,
@@ -167,7 +178,7 @@ export async function createIssues(
   // Fetch existing issues for idempotency check
   let existingIssues: { title: string; body?: string }[] = [];
   try {
-    existingIssues = await issueClient.listIssues(labels);
+    existingIssues = await withRetry(() => issueClient.listIssues(labels));
   } catch (error) {
     core.warning(
       `Could not fetch existing issues: ${error instanceof Error ? error.message : String(error)}`
@@ -195,8 +206,8 @@ export async function createIssues(
       continue;
     }
 
-    const title = buildIssueTitle(candidate);
-    const body = buildIssueBody(candidate);
+    const title = buildIssueTitle(candidate, config);
+    const body = buildIssueBody(candidate, config);
 
     if (dryRun) {
       core.info(`[DRY RUN] Would create issue: ${title}`);
@@ -207,7 +218,9 @@ export async function createIssues(
     }
 
     try {
-      const issue = await issueClient.createIssue(title, body, labels);
+      const issue = await withRetry(() =>
+        issueClient.createIssue(title, body, labels)
+      );
       core.info(`Created issue #${issue.number}: ${issue.html_url}`);
       created++;
     } catch (error) {
@@ -220,4 +233,4 @@ export async function createIssues(
   return created;
 }
 
-export { buildIssueTitle, buildIssueBody, escapeTableCell };
+export { buildIssueTitle, buildIssueBody, escapeTableCell, renderTemplate };

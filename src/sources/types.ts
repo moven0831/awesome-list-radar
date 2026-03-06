@@ -2,7 +2,7 @@ export interface Candidate {
   url: string;
   title: string;
   description: string;
-  source: "github" | "arxiv" | "blog" | "web_page";
+  source: "github" | "arxiv" | "blog" | "web_page" | "registry";
   metadata: CandidateMetadata;
 }
 

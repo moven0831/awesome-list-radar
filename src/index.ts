@@ -5,7 +5,9 @@ import { collectGitHub } from "./sources/github";
 import { collectArxiv } from "./sources/arxiv";
 import { collectBlogs } from "./sources/blogs";
 import { collectWebPages } from "./sources/web_pages";
+import { collectRegistries } from "./sources/registry";
 import { filterCandidates } from "./filter/keywords";
+import { filterByMetadata } from "./filter/metadata";
 import { dedup } from "./filter/dedup";
 import { classifyCandidates } from "./classifier/llm";
 import { createIssues } from "./output/issues";
@@ -33,6 +35,9 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
   if (config.sources.web_pages) {
     candidates.push(...(await collectWebPages(config)));
   }
+  if (config.sources.registries) {
+    candidates.push(...(await collectRegistries(config)));
+  }
 
   return candidates;
 }
@@ -57,9 +62,10 @@ async function run(): Promise<void> {
           filter: async (candidates, cfg) => {
             // First filter out already-seen candidates
             const unseen = filterSeenCandidates(candidates, state);
-            // Then apply keyword filtering and dedup
+            // Then apply keyword filtering, metadata filtering, and dedup
             const keywordFiltered = filterCandidates(unseen, cfg);
-            const metadataResult = dedup(keywordFiltered, cfg);
+            const metadataFiltered = filterByMetadata(keywordFiltered, cfg);
+            const metadataResult = dedup(metadataFiltered, cfg);
 
             // Record candidates that were filtered out
             const filteredOut = unseen.filter(
@@ -88,7 +94,13 @@ async function run(): Promise<void> {
       );
     } finally {
       // Save state regardless of pipeline success/failure
-      saveState(config.state_file, state);
+      try {
+        saveState(config.state_file, state);
+      } catch (saveError) {
+        core.warning(
+          `Failed to save state: ${saveError instanceof Error ? saveError.message : String(saveError)}`
+        );
+      }
     }
 
     core.setOutput("candidates_found", result.candidatesFound);
