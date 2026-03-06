@@ -1,6 +1,6 @@
 {
   "name": "awesome-list-radar",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "description": "GitHub Action that discovers relevant content for awesome lists and files issues for maintainer triage",
   "main": "dist/index.js",
   "scripts": {
