@@ -46061,6 +46061,17 @@ const SourcesSchema = zod_1.z.object({
     blogs: BlogsSourceSchema.optional(),
     web_pages: WebPagesSourceSchema.optional(),
 });
+const FilterSchema = zod_1.z
+    .object({
+    include: zod_1.z.array(zod_1.z.string()).optional(),
+    require_all: zod_1.z.array(zod_1.z.string()).optional(),
+    exclude: zod_1.z.array(zod_1.z.string()).optional(),
+    exclude_forks: zod_1.z.boolean().default(false),
+    exclude_archived: zod_1.z.boolean().default(false),
+    require_license: zod_1.z.boolean().default(false),
+    max_age_days: zod_1.z.number().int().positive().optional(),
+})
+    .default({});
 const ClassificationSchema = zod_1.z.object({
     model: zod_1.z.string().default("claude-sonnet-4-6"),
     threshold: zod_1.z.number().min(0).max(100).default(70),
@@ -46081,6 +46092,7 @@ exports.RadarConfigSchema = zod_1.z.object({
     description: zod_1.z.string().min(1),
     list_file: zod_1.z.string().default("README.md"),
     sources: SourcesSchema.refine((s) => s.github || s.arxiv || s.blogs || s.web_pages, "At least one source must be configured"),
+    filter: FilterSchema,
     classification: ClassificationSchema.default({}),
     issue_template: IssueTemplateSchema.default({}),
 });
@@ -46135,19 +46147,42 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeUrl = normalizeUrl;
 exports.extractUrlsFromMarkdown = extractUrlsFromMarkdown;
 exports.dedup = dedup;
 const node_fs_1 = __nccwpck_require__(3024);
 const core = __importStar(__nccwpck_require__(7484));
 const URL_REGEX = /https?:\/\/[^\s\)>\]]+/g;
+function normalizeUrl(url) {
+    let normalized = url.toLowerCase();
+    // Remove protocol
+    normalized = normalized.replace(/^https?:\/\//, "");
+    // Remove www.
+    normalized = normalized.replace(/^www\./, "");
+    // Remove trailing slash
+    normalized = normalized.replace(/\/+$/, "");
+    // Remove tracking params
+    try {
+        const parsed = new URL("https://" + normalized);
+        const paramsToRemove = [...parsed.searchParams.keys()].filter((k) => k.startsWith("utm_") || k === "ref" || k === "source");
+        paramsToRemove.forEach((k) => parsed.searchParams.delete(k));
+        // Reconstruct without protocol
+        normalized = parsed.hostname + parsed.pathname + parsed.search;
+        normalized = normalized.replace(/\/+$/, "");
+    }
+    catch {
+        // If URL parsing fails, just use the lowercase version
+    }
+    return normalized;
+}
 function extractUrlsFromMarkdown(markdown) {
     const urls = new Set();
     const matches = markdown.match(URL_REGEX);
     if (matches) {
         for (const url of matches) {
-            // Normalize: remove trailing punctuation, lowercase
-            const cleaned = url.replace(/[.,;:!?]+$/, "").toLowerCase();
-            urls.add(cleaned);
+            // Remove trailing punctuation before normalizing
+            const cleaned = url.replace(/[.,;:!?]+$/, "");
+            urls.add(normalizeUrl(cleaned));
         }
     }
     return urls;
@@ -46162,7 +46197,7 @@ function dedup(candidates, config, readFileFn = node_fs_1.readFileSync) {
         core.warning(`Could not read list file "${config.list_file}", skipping dedup`);
         return candidates;
     }
-    const filtered = candidates.filter((c) => !existingUrls.has(c.url.toLowerCase()));
+    const filtered = candidates.filter((c) => !existingUrls.has(normalizeUrl(c.url)));
     core.info(`Dedup: ${candidates.length} → ${filtered.length} candidates (${existingUrls.size} existing URLs)`);
     return filtered;
 }
@@ -46212,6 +46247,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.filterCandidates = filterCandidates;
 exports.getAllKeywords = getAllKeywords;
 exports.matchesAnyKeyword = matchesAnyKeyword;
+exports.matchesAllKeywords = matchesAllKeywords;
 const core = __importStar(__nccwpck_require__(7484));
 function getAllKeywords(config) {
     const keywords = [];
@@ -46233,17 +46269,116 @@ function matchesAnyKeyword(text, keywords) {
     const lower = text.toLowerCase();
     return keywords.some((kw) => lower.includes(kw));
 }
+function matchesAllKeywords(text, keywords) {
+    const lower = text.toLowerCase();
+    return keywords.every((kw) => lower.includes(kw));
+}
+function getSearchText(c) {
+    return `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
+}
 function filterCandidates(candidates, config) {
-    const keywords = getAllKeywords(config);
-    if (keywords.length === 0) {
-        core.info("No keywords configured, passing all candidates through");
-        return candidates;
+    // Determine include keywords: prefer filter.include, fall back to source keywords
+    const includeKeywords = config.filter?.include?.map((kw) => kw.toLowerCase()) ??
+        getAllKeywords(config);
+    const requireAllKeywords = (config.filter?.require_all ?? []).map((kw) => kw.toLowerCase());
+    const excludeKeywords = config.filter?.exclude?.map((kw) => kw.toLowerCase()) ?? [];
+    let filtered = candidates;
+    // Step 1: include (OR match)
+    if (includeKeywords.length > 0) {
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return matchesAnyKeyword(searchText, includeKeywords);
+        });
+        core.info(`Include filter: ${candidates.length} → ${filtered.length} candidates`);
     }
+    else {
+        core.info("No keywords configured, passing all candidates through");
+    }
+    // Step 2: require_all (AND match)
+    if (requireAllKeywords.length > 0) {
+        const before = filtered.length;
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return matchesAllKeywords(searchText, requireAllKeywords);
+        });
+        core.info(`Require-all filter: ${before} → ${filtered.length} candidates`);
+    }
+    // Step 3: exclude (NOT match)
+    if (excludeKeywords.length > 0) {
+        const before = filtered.length;
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return !matchesAnyKeyword(searchText, excludeKeywords);
+        });
+        core.info(`Exclude filter: ${before} → ${filtered.length} candidates`);
+    }
+    return filtered;
+}
+
+
+/***/ }),
+
+/***/ 445:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.filterByMetadata = filterByMetadata;
+const core = __importStar(__nccwpck_require__(7484));
+function filterByMetadata(candidates, config) {
+    const filter = config.filter;
     const filtered = candidates.filter((c) => {
-        const searchText = `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
-        return matchesAnyKeyword(searchText, keywords);
+        if (filter.exclude_forks && c.metadata.fork === true)
+            return false;
+        if (filter.exclude_archived && c.metadata.archived === true)
+            return false;
+        if (filter.require_license && !c.metadata.license)
+            return false;
+        if (filter.max_age_days) {
+            const dateField = c.metadata.lastPushedAt || c.metadata.publishedAt;
+            if (dateField) {
+                const age = (Date.now() - new Date(dateField).getTime()) / (1000 * 60 * 60 * 24);
+                if (age > filter.max_age_days)
+                    return false;
+            }
+        }
+        return true;
     });
-    core.info(`Keyword filter: ${candidates.length} → ${filtered.length} candidates`);
+    core.info(`Metadata filter: ${candidates.length} → ${filtered.length} candidates`);
     return filtered;
 }
 
@@ -46297,6 +46432,7 @@ const arxiv_1 = __nccwpck_require__(5012);
 const blogs_1 = __nccwpck_require__(4731);
 const web_pages_1 = __nccwpck_require__(8555);
 const keywords_1 = __nccwpck_require__(9216);
+const metadata_1 = __nccwpck_require__(445);
 const dedup_1 = __nccwpck_require__(6962);
 const llm_1 = __nccwpck_require__(5178);
 const issues_1 = __nccwpck_require__(3597);
@@ -46318,7 +46454,8 @@ async function collect(config) {
 }
 async function filter(candidates, config) {
     const keywordFiltered = (0, keywords_1.filterCandidates)(candidates, config);
-    return (0, dedup_1.dedup)(keywordFiltered, config);
+    const metadataFiltered = (0, metadata_1.filterByMetadata)(keywordFiltered, config);
+    return (0, dedup_1.dedup)(metadataFiltered, config);
 }
 async function run() {
     try {

@@ -3,6 +3,7 @@ import {
   filterCandidates,
   getAllKeywords,
   matchesAnyKeyword,
+  matchesAllKeywords,
 } from "../../src/filter/keywords";
 import type { RadarConfig } from "../../src/config";
 import type { Candidate } from "../../src/sources/types";
@@ -24,6 +25,11 @@ const baseConfig = {
       categories: ["cs.CR"],
       keywords: ["MSM", "zero-knowledge"],
     },
+  },
+  filter: {
+    exclude_forks: false,
+    exclude_archived: false,
+    require_license: false,
   },
   classification: {
     model: "claude-sonnet-4-6",
@@ -84,6 +90,16 @@ describe("matchesAnyKeyword", () => {
   });
 });
 
+describe("matchesAllKeywords", () => {
+  it("returns true when all keywords present", () => {
+    expect(matchesAllKeywords("WebGPU MSM library", ["webgpu", "msm"])).toBe(true);
+  });
+
+  it("returns false when some keywords missing", () => {
+    expect(matchesAllKeywords("WebGPU library", ["webgpu", "msm"])).toBe(false);
+  });
+});
+
 describe("filterCandidates", () => {
   it("keeps candidates matching any keyword in title, description, or topics", () => {
     const candidates = [
@@ -115,5 +131,116 @@ describe("filterCandidates", () => {
 
     const filtered = filterCandidates(candidates, baseConfig);
     expect(filtered).toHaveLength(1);
+  });
+
+  it("uses filter.include keywords when specified (OR mode)", () => {
+    const config = {
+      ...baseConfig,
+      filter: {
+        ...baseConfig.filter,
+        include: ["rust", "wasm"],
+      },
+    } as RadarConfig;
+
+    const candidates = [
+      makeCand("Rust GPU", "GPU computing in Rust"),
+      makeCand("WASM Runtime", "WebAssembly runtime"),
+      makeCand("Python ML", "Machine learning in Python"),
+    ];
+
+    const filtered = filterCandidates(candidates, config);
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map((c) => c.title)).toEqual(["Rust GPU", "WASM Runtime"]);
+  });
+
+  it("applies require_all (AND mode)", () => {
+    const config = {
+      ...baseConfig,
+      filter: {
+        ...baseConfig.filter,
+        require_all: ["gpu", "rust"],
+      },
+    } as RadarConfig;
+
+    const candidates = [
+      makeCand("Rust GPU Lib", "GPU computing in Rust"),
+      makeCand("GPU Toolkit", "GPU computing tools"),
+      makeCand("Rust Web", "Web framework in Rust"),
+    ];
+
+    // All pass include (source keywords don't match these, but require_all applies after include)
+    // First, include filter with source keywords: "webgpu", "gpu-crypto", "msm", "zero-knowledge"
+    // "Rust GPU Lib" has "gpu" which doesn't match source keywords exactly
+    // Let's use filter.include to make this clearer
+    const configWithInclude = {
+      ...baseConfig,
+      filter: {
+        ...baseConfig.filter,
+        include: ["gpu", "rust"],
+        require_all: ["gpu", "rust"],
+      },
+    } as RadarConfig;
+
+    const filtered = filterCandidates(candidates, configWithInclude);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].title).toBe("Rust GPU Lib");
+  });
+
+  it("applies exclude (NOT mode)", () => {
+    const config = {
+      ...baseConfig,
+      filter: {
+        ...baseConfig.filter,
+        include: ["gpu", "webgpu"],
+        exclude: ["deprecated"],
+      },
+    } as RadarConfig;
+
+    const candidates = [
+      makeCand("GPU Lib", "A great GPU library"),
+      makeCand("WebGPU Old", "Deprecated WebGPU project"),
+      makeCand("GPU Tools", "Useful GPU utilities"),
+    ];
+
+    const filtered = filterCandidates(candidates, config);
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map((c) => c.title)).toEqual(["GPU Lib", "GPU Tools"]);
+  });
+
+  it("combines include + require_all + exclude", () => {
+    const config = {
+      ...baseConfig,
+      filter: {
+        ...baseConfig.filter,
+        include: ["gpu", "cuda"],
+        require_all: ["gpu"],
+        exclude: ["toy"],
+      },
+    } as RadarConfig;
+
+    const candidates = [
+      makeCand("GPU CUDA Toolkit", "Fast GPU CUDA computing"),
+      makeCand("GPU Toy Project", "A toy GPU demo"),
+      makeCand("CUDA Compiler", "Compiles CUDA code"),
+    ];
+
+    const filtered = filterCandidates(candidates, config);
+    // include: "GPU CUDA Toolkit" (gpu), "GPU Toy Project" (gpu), "CUDA Compiler" (cuda) → all 3
+    // require_all ["gpu"]: "GPU CUDA Toolkit", "GPU Toy Project" → 2
+    // exclude ["toy"]: "GPU CUDA Toolkit" → 1
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].title).toBe("GPU CUDA Toolkit");
+  });
+
+  it("backward compat: no filter.include falls back to source keywords", () => {
+    // baseConfig has no filter.include, so it should use source keywords
+    const candidates = [
+      makeCand("WebGPU Renderer", "3D rendering"),
+      makeCand("Unrelated App", "Nothing to do with topics"),
+    ];
+
+    const filtered = filterCandidates(candidates, baseConfig);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].title).toBe("WebGPU Renderer");
   });
 });

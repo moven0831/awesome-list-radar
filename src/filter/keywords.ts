@@ -26,26 +26,65 @@ function matchesAnyKeyword(text: string, keywords: string[]): boolean {
   return keywords.some((kw) => lower.includes(kw));
 }
 
+function matchesAllKeywords(text: string, keywords: string[]): boolean {
+  const lower = text.toLowerCase();
+  return keywords.every((kw) => lower.includes(kw));
+}
+
+function getSearchText(c: Candidate): string {
+  return `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
+}
+
 export function filterCandidates(
   candidates: Candidate[],
   config: RadarConfig
 ): Candidate[] {
-  const keywords = getAllKeywords(config);
+  // Determine include keywords: prefer filter.include, fall back to source keywords
+  const includeKeywords =
+    config.filter?.include?.map((kw) => kw.toLowerCase()) ??
+    getAllKeywords(config);
+  const requireAllKeywords = (config.filter?.require_all ?? []).map((kw) => kw.toLowerCase());
+  const excludeKeywords =
+    config.filter?.exclude?.map((kw) => kw.toLowerCase()) ?? [];
 
-  if (keywords.length === 0) {
+  let filtered = candidates;
+
+  // Step 1: include (OR match)
+  if (includeKeywords.length > 0) {
+    filtered = filtered.filter((c) => {
+      const searchText = getSearchText(c);
+      return matchesAnyKeyword(searchText, includeKeywords);
+    });
+    core.info(
+      `Include filter: ${candidates.length} → ${filtered.length} candidates`
+    );
+  } else {
     core.info("No keywords configured, passing all candidates through");
-    return candidates;
   }
 
-  const filtered = candidates.filter((c) => {
-    const searchText = `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
-    return matchesAnyKeyword(searchText, keywords);
-  });
+  // Step 2: require_all (AND match)
+  if (requireAllKeywords.length > 0) {
+    const before = filtered.length;
+    filtered = filtered.filter((c) => {
+      const searchText = getSearchText(c);
+      return matchesAllKeywords(searchText, requireAllKeywords);
+    });
+    core.info(
+      `Require-all filter: ${before} → ${filtered.length} candidates`
+    );
+  }
 
-  core.info(
-    `Keyword filter: ${candidates.length} → ${filtered.length} candidates`
-  );
+  // Step 3: exclude (NOT match)
+  if (excludeKeywords.length > 0) {
+    const before = filtered.length;
+    filtered = filtered.filter((c) => {
+      const searchText = getSearchText(c);
+      return !matchesAnyKeyword(searchText, excludeKeywords);
+    });
+    core.info(`Exclude filter: ${before} → ${filtered.length} candidates`);
+  }
+
   return filtered;
 }
 
-export { getAllKeywords, matchesAnyKeyword };
+export { getAllKeywords, matchesAnyKeyword, matchesAllKeywords };

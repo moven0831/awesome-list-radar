@@ -5,14 +5,38 @@ import type { Candidate } from "../sources/types";
 
 const URL_REGEX = /https?:\/\/[^\s\)>\]]+/g;
 
+export function normalizeUrl(url: string): string {
+  let normalized = url.toLowerCase();
+  // Remove protocol
+  normalized = normalized.replace(/^https?:\/\//, "");
+  // Remove www.
+  normalized = normalized.replace(/^www\./, "");
+  // Remove trailing slash
+  normalized = normalized.replace(/\/+$/, "");
+  // Remove tracking params
+  try {
+    const parsed = new URL("https://" + normalized);
+    const paramsToRemove = [...parsed.searchParams.keys()].filter(
+      (k) => k.startsWith("utm_") || k === "ref" || k === "source"
+    );
+    paramsToRemove.forEach((k) => parsed.searchParams.delete(k));
+    // Reconstruct without protocol
+    normalized = parsed.hostname + parsed.pathname + parsed.search;
+    normalized = normalized.replace(/\/+$/, "");
+  } catch {
+    // If URL parsing fails, just use the lowercase version
+  }
+  return normalized;
+}
+
 export function extractUrlsFromMarkdown(markdown: string): Set<string> {
   const urls = new Set<string>();
   const matches = markdown.match(URL_REGEX);
   if (matches) {
     for (const url of matches) {
-      // Normalize: remove trailing punctuation, lowercase
-      const cleaned = url.replace(/[.,;:!?]+$/, "").toLowerCase();
-      urls.add(cleaned);
+      // Remove trailing punctuation before normalizing
+      const cleaned = url.replace(/[.,;:!?]+$/, "");
+      urls.add(normalizeUrl(cleaned));
     }
   }
   return urls;
@@ -38,7 +62,7 @@ export function dedup(
   }
 
   const filtered = candidates.filter(
-    (c) => !existingUrls.has(c.url.toLowerCase())
+    (c) => !existingUrls.has(normalizeUrl(c.url))
   );
 
   core.info(
