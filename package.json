@@ -20,8 +20,10 @@
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0",
     "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.1",
     "@octokit/rest": "^21.1.0",
     "fast-xml-parser": "^4.5.1",
+    "openai": "^6.27.0",
     "rss-parser": "^3.13.0",
     "yaml": "^2.7.0",
     "zod": "^3.24.2"
