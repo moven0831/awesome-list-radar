@@ -110,7 +110,7 @@ export async function collectWebPages(
       const message = await anthropic.messages.create({
         model: webPages.model,
         max_tokens: 4096,
-        system: webPages.extraction_prompt ?? SYSTEM_PROMPT,
+        system: webPages.extraction_prompt || SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
