@@ -17,10 +17,12 @@ import {
   filterSeenCandidates,
   recordCandidates,
 } from "./state";
+import { createProvider } from "./llm";
+import type { LLMProvider } from "./llm";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
-async function collect(config: RadarConfig): Promise<Candidate[]> {
+async function collect(config: RadarConfig, llmClient?: LLMProvider, webPagesLlmClient?: LLMProvider): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   if (config.sources.github) {
@@ -33,7 +35,7 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
     candidates.push(...(await collectBlogs(config)));
   }
   if (config.sources.web_pages) {
-    candidates.push(...(await collectWebPages(config)));
+    candidates.push(...(await collectWebPages(config, undefined, webPagesLlmClient ?? llmClient)));
   }
   if (config.sources.registries) {
     candidates.push(...(await collectRegistries(config)));
@@ -50,6 +52,26 @@ async function run(): Promise<void> {
     core.info(`Loading config from ${configPath}`);
     const config = loadConfig(configPath);
 
+    // Create LLM provider
+    const apiKey = core.getInput("llm_api_key") || core.getInput("anthropic_api_key");
+    if (!apiKey) {
+      throw new Error("Either llm_api_key or anthropic_api_key must be provided");
+    }
+    // llm_provider action input overrides the config-level provider
+    const providerOverride = core.getInput("llm_provider");
+    const provider = providerOverride || config.classification.provider;
+    const llmClient = createProvider({
+      provider,
+      baseUrl: config.classification.base_url,
+      apiKey,
+    });
+
+    // Create a separate LLM client for web page extraction if a different provider is configured
+    const webPagesProvider = config.sources.web_pages?.provider;
+    const webPagesLlmClient = webPagesProvider
+      ? createProvider({ provider: webPagesProvider, apiKey })
+      : undefined;
+
     // Load state
     const state = loadState(config.state_file);
 
@@ -58,7 +80,7 @@ async function run(): Promise<void> {
       result = await runPipeline(
         config,
         {
-          collect,
+          collect: async (cfg) => collect(cfg, llmClient, webPagesLlmClient),
           filter: async (candidates, cfg) => {
             // First filter out already-seen candidates
             const unseen = filterSeenCandidates(candidates, state);
@@ -76,7 +98,7 @@ async function run(): Promise<void> {
             return metadataResult;
           },
           classify: async (candidates, cfg) => {
-            const classified = await classifyCandidates(candidates, cfg);
+            const classified = await classifyCandidates(candidates, cfg, llmClient);
 
             // Record accepted (classified) and rejected (below threshold) candidates
             const classifiedUrls = new Set(classified.map((c) => c.url));

@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
+import type { LLMProvider } from "../llm";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
 import { matchesKeywords } from "./blogs";
@@ -7,6 +7,12 @@ import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_HTML_LENGTH = 15_000;
+
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-4o-mini",
+  google: "gemini-2.0-flash",
+};
 
 const SYSTEM_PROMPT = `You are an article link extractor. Given the cleaned text of a web page, extract all article or blog post links you can find.
 
@@ -78,16 +84,16 @@ export function resolveUrl(base: string, href: string): string {
 export async function collectWebPages(
   config: RadarConfig,
   fetchFn?: typeof fetch,
-  client?: Anthropic
+  client?: LLMProvider
 ): Promise<Candidate[]> {
   if (!config.sources.web_pages) return [];
+
+  if (!client) throw new Error("LLM client is required for web page extraction");
 
   const webPages = config.sources.web_pages;
   const fetcher = fetchFn ?? fetch;
   const timeout = webPages.request_timeout;
   const userAgent = webPages.user_agent;
-  const anthropic =
-    client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
 
   const results = await Promise.allSettled(
     webPages.urls.map(async (pageUrl) => {
@@ -113,10 +119,10 @@ export async function collectWebPages(
 
       core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
 
-      const message = await withRetry(() =>
-        anthropic.messages.create({
-          model: webPages.model,
-          max_tokens: 4096,
+      const llmResponse = await withRetry(() =>
+        client!.chat({
+          model: webPages.model ?? (webPages.provider ? DEFAULT_MODELS[webPages.provider] : undefined) ?? config.classification.model,
+          maxTokens: 4096,
           system: webPages.extraction_prompt || SYSTEM_PROMPT,
           messages: [
             {
@@ -127,8 +133,7 @@ export async function collectWebPages(
         })
       );
 
-      const text =
-        message.content[0].type === "text" ? message.content[0].text : "[]";
+      const text = llmResponse.text || "[]";
       const links = extractFirstJsonArray(text);
 
       // Resolve relative URLs

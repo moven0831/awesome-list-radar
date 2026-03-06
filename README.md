@@ -10,7 +10,7 @@ Awesome lists suffer from **decay**: new projects appear that nobody submits, li
 
 1. **Collect** — Scans GitHub repos, arXiv papers, blog RSS feeds, web pages, and package registries (npm, PyPI, crates.io) for new content
 2. **Filter** — Matches candidates by keywords/topics, metadata filters, and deduplicates against your existing list
-3. **Classify** — Scores relevance using Claude API with structured reasoning and budget control
+3. **Classify** — Scores relevance using any OpenAI-compatible LLM (Anthropic, OpenAI, Google, or custom endpoint) with structured reasoning and budget control
 4. **Output** — Creates GitHub Issues with metadata, suggested entry, and LLM reasoning
 
 ## Quick Start
@@ -70,7 +70,8 @@ filter:
   max_age_days: 90
 
 classification:
-  model: claude-sonnet-4-6
+  provider: anthropic           # anthropic | openai | google
+  model: claude-sonnet-4-6      # Optional: defaults based on provider
   threshold: 70
   max_classifications_per_run: 5   # Replaces deprecated max_issues_per_run
   max_budget_usd: 1.00
@@ -106,12 +107,28 @@ jobs:
       - uses: moven0831/awesome-list-radar@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          llm_api_key: ${{ secrets.LLM_API_KEY }}
+          # llm_provider: anthropic  # or openai, google (default: anthropic)
 ```
 
-### 3. Add your Anthropic API key
+### 3. Add your LLM API key
 
-Go to **Settings → Secrets and variables → Actions** and add `ANTHROPIC_API_KEY`.
+Go to **Settings → Secrets and variables → Actions** and add `LLM_API_KEY` with your provider's API key.
+
+Supported providers:
+| Provider | Default Model | API Key Source |
+|----------|--------------|----------------|
+| `anthropic` (default) | `claude-sonnet-4-6` | [Anthropic Console](https://console.anthropic.com/) |
+| `openai` | `gpt-4o-mini` | [OpenAI Platform](https://platform.openai.com/) |
+| `google` | `gemini-2.0-flash` | [Google AI Studio](https://aistudio.google.com/) |
+
+You can also use any OpenAI-compatible endpoint (Ollama, vLLM, Together AI, etc.) by setting `base_url` in your classification config:
+
+```yaml
+classification:
+  base_url: http://localhost:11434/v1/  # Ollama
+  model: llama3
+```
 
 ## Config Reference
 
@@ -139,8 +156,9 @@ Go to **Settings → Secrets and variables → Actions** and add `ANTHROPIC_API_
 | `keywords` | string[] | — | Filter feed entries by keywords |
 | **sources.web_pages** | | | |
 | `urls` | string[] | *required* | Web page URLs to scan |
+| `provider` | string | — | LLM provider override for extraction (falls back to classification provider) |
 | `keywords` | string[] | — | Filter extracted content by keywords |
-| `model` | string | `claude-haiku-4-5-20251001` | Model for content extraction |
+| `model` | string | — | Model for content extraction (falls back to classification model) |
 | `request_timeout` | number | `30000` | HTTP request timeout in ms (1000–120000) |
 | `extraction_prompt` | string | — | Custom prompt for content extraction |
 | `user_agent` | string | — | Custom User-Agent header |
@@ -158,7 +176,9 @@ Go to **Settings → Secrets and variables → Actions** and add `ANTHROPIC_API_
 | `require_license` | boolean | `false` | Only include candidates with a license |
 | `max_age_days` | number | — | Maximum age of candidate in days |
 | **classification** | | | |
-| `model` | string | `claude-sonnet-4-6` | Anthropic model to use |
+| `provider` | string | `"anthropic"` | LLM provider: `anthropic`, `openai`, or `google` |
+| `base_url` | string | — | Custom OpenAI-compatible API base URL (overrides provider default) |
+| `model` | string | *per-provider* | Model name (defaults: anthropic→`claude-sonnet-4-6`, openai→`gpt-4o-mini`, google→`gemini-2.0-flash`) |
 | `threshold` | number | `70` | Minimum relevance score (0-100) to create an issue |
 | `max_classifications_per_run` | number | `5` | Max candidates to classify per run (controls API cost) |
 | `max_budget_usd` | number | — | Maximum estimated LLM cost per run in USD |
@@ -177,8 +197,12 @@ Go to **Settings → Secrets and variables → Actions** and add `ANTHROPIC_API_
 |-------|----------|---------|-------------|
 | `config_path` | No | `radar.config.yml` | Path to your config file |
 | `github_token` | Yes | — | GitHub token for API access and issue creation |
-| `anthropic_api_key` | Yes | — | Anthropic API key for relevance scoring |
+| `llm_api_key` | Yes* | — | API key for the LLM provider |
+| `anthropic_api_key` | No | — | *Deprecated*: use `llm_api_key` instead |
+| `llm_provider` | No | `anthropic` | LLM provider: `anthropic`, `openai`, or `google` |
 | `dry_run` | No | `false` | Log candidates without creating issues |
+
+\* Either `llm_api_key` or `anthropic_api_key` must be provided.
 
 ## Action Outputs
 

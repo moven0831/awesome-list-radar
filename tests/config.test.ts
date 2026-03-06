@@ -464,7 +464,7 @@ sources:
     urls:
       - https://example.com/blog
 `);
-    expect(config.sources.web_pages?.model).toBe("claude-haiku-4-5-20251001");
+    expect(config.sources.web_pages?.model).toBeUndefined();
     expect(config.sources.web_pages?.request_timeout).toBe(30000);
     expect(config.sources.web_pages?.extraction_prompt).toBeUndefined();
     expect(config.sources.web_pages?.user_agent).toBeUndefined();
@@ -497,6 +497,110 @@ sources:
     urls:
       - https://example.com/blog
     request_timeout: 500
+`)
+    ).toThrow();
+  });
+
+  it("defaults classification provider to anthropic", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.provider).toBe("anthropic");
+  });
+
+  it("resolves default model based on provider", () => {
+    const anthropicConfig = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: anthropic
+`);
+    expect(anthropicConfig.classification.model).toBe("claude-sonnet-4-6");
+
+    const openaiConfig = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: openai
+`);
+    expect(openaiConfig.classification.model).toBe("gpt-4o-mini");
+
+    const googleConfig = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: google
+`);
+    expect(googleConfig.classification.model).toBe("gemini-2.0-flash");
+  });
+
+  it("allows explicit model to override provider default", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: openai
+  model: gpt-4o
+`);
+    expect(config.classification.provider).toBe("openai");
+    expect(config.classification.model).toBe("gpt-4o");
+  });
+
+  it("parses web_pages provider field", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    provider: openai
+`);
+    expect(config.sources.web_pages?.provider).toBe("openai");
+  });
+
+  it("accepts optional base_url for classification", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: openai
+  base_url: https://custom-llm.example.com/v1/
+`);
+    expect(config.classification.base_url).toBe("https://custom-llm.example.com/v1/");
+  });
+
+  it("defaults base_url to undefined", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.base_url).toBeUndefined();
+  });
+
+  it("rejects invalid classification provider", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  provider: cohere
 `)
     ).toThrow();
   });
