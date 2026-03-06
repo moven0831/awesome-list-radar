@@ -44,7 +44,8 @@ const WebPagesSourceSchema = z.object({
   urls: z.array(z.string().url()).min(1),
   keywords: z.array(z.string()).optional(),
   extraction_prompt: z.string().min(1).optional(),
-  model: z.string().min(1).default("claude-haiku-4-5-20251001"),
+  provider: z.enum(["anthropic", "openai", "google"]).optional(),
+  model: z.string().min(1).optional(),
   request_timeout: z.number().int().min(1000).max(120000).default(30000),
   user_agent: z.string().optional(),
 });
@@ -79,7 +80,8 @@ const FilterSchema = z
   .default({});
 
 const ClassificationSchema = z.object({
-  model: z.string().default("claude-sonnet-4-6"),
+  provider: z.enum(["anthropic", "openai", "google"]).default("anthropic"),
+  model: z.string().optional(),
   threshold: z.number().min(0).max(100).default(70),
   max_classifications_per_run: z.number().int().positive().optional(),
   max_issues_per_run: z.number().int().positive().optional(), // deprecated alias
@@ -88,10 +90,18 @@ const ClassificationSchema = z.object({
   context: z.string().optional(),
   max_description_length: z.number().int().positive().max(10000).default(500),
   categories: z.array(z.string()).optional(),
-}).transform((val) => ({
-  ...val,
-  max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
-}));
+}).transform((val) => {
+  const defaultModels: Record<string, string> = {
+    anthropic: "claude-sonnet-4-6",
+    openai: "gpt-4o-mini",
+    google: "gemini-2.0-flash",
+  };
+  return {
+    ...val,
+    model: val.model ?? defaultModels[val.provider] ?? "claude-sonnet-4-6",
+    max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
+  };
+});
 
 const IssueTemplateSchema = z.object({
   labels: z.array(z.string()).default(["radar", "needs-review"]),

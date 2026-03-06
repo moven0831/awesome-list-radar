@@ -10,9 +10,16 @@ inputs:
   github_token:
     description: 'GitHub token for API access and issue creation'
     required: true
+  llm_api_key:
+    description: 'API key for the LLM provider (Anthropic, OpenAI, or Google)'
+    required: false
   anthropic_api_key:
-    description: 'Anthropic API key for LLM-based relevance scoring'
-    required: true
+    description: 'Deprecated: use llm_api_key instead. Anthropic API key for LLM-based relevance scoring'
+    required: false
+  llm_provider:
+    description: 'LLM provider to use: anthropic, openai, or google'
+    required: false
+    default: 'anthropic'
   dry_run:
     description: 'If true, log candidates without creating issues'
     required: false
