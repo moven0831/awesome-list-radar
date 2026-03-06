@@ -14,7 +14,7 @@ async function collectNpm(
   fetchFn: typeof fetch
 ): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
-  const query = entry.keywords.join("+");
+  const query = entry.keywords.join(" ");
   const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${entry.max_results}`;
 
   const response = await fetchFn(url);
@@ -26,6 +26,10 @@ async function collectNpm(
   const data = (await response.json()) as any;
   for (const result of data.objects ?? []) {
     const pkg = result.package;
+
+    if (entry.min_downloads > 0 && (result.downloads?.monthly ?? 0) < entry.min_downloads) {
+      continue;
+    }
 
     candidates.push({
       url: `https://www.npmjs.com/package/${pkg.name}`,
@@ -81,7 +85,7 @@ async function collectCrates(
   fetchFn: typeof fetch
 ): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
-  const query = entry.keywords.join("+");
+  const query = entry.keywords.join(" ");
   const url = `https://crates.io/api/v1/crates?q=${encodeURIComponent(query)}&per_page=${entry.max_results}&sort=downloads`;
 
   const response = await fetchFn(url, {
