@@ -14,6 +14,6 @@ export function createProvider(options: {
   apiKey: string;
 }): LLMProvider {
   const baseURL =
-    options.baseUrl ?? PROVIDER_BASE_URLS[options.provider ?? "openai"];
+    options.baseUrl ?? PROVIDER_BASE_URLS[options.provider ?? "anthropic"];
   return new OpenAICompatibleProvider(options.apiKey, baseURL);
 }

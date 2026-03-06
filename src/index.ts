@@ -22,7 +22,7 @@ import type { LLMProvider } from "./llm";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
-async function collect(config: RadarConfig, llmClient?: LLMProvider): Promise<Candidate[]> {
+async function collect(config: RadarConfig, llmClient?: LLMProvider, webPagesLlmClient?: LLMProvider): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   if (config.sources.github) {
@@ -35,7 +35,7 @@ async function collect(config: RadarConfig, llmClient?: LLMProvider): Promise<Ca
     candidates.push(...(await collectBlogs(config)));
   }
   if (config.sources.web_pages) {
-    candidates.push(...(await collectWebPages(config, undefined, llmClient)));
+    candidates.push(...(await collectWebPages(config, undefined, webPagesLlmClient ?? llmClient)));
   }
   if (config.sources.registries) {
     candidates.push(...(await collectRegistries(config)));
@@ -57,11 +57,20 @@ async function run(): Promise<void> {
     if (!apiKey) {
       throw new Error("Either llm_api_key or anthropic_api_key must be provided");
     }
+    // llm_provider action input overrides the config-level provider
+    const providerOverride = core.getInput("llm_provider");
+    const provider = providerOverride || config.classification.provider;
     const llmClient = createProvider({
-      provider: config.classification.provider,
+      provider,
       baseUrl: config.classification.base_url,
       apiKey,
     });
+
+    // Create a separate LLM client for web page extraction if a different provider is configured
+    const webPagesProvider = config.sources.web_pages?.provider;
+    const webPagesLlmClient = webPagesProvider
+      ? createProvider({ provider: webPagesProvider, apiKey })
+      : undefined;
 
     // Load state
     const state = loadState(config.state_file);
@@ -71,7 +80,7 @@ async function run(): Promise<void> {
       result = await runPipeline(
         config,
         {
-          collect: async (cfg) => collect(cfg, llmClient),
+          collect: async (cfg) => collect(cfg, llmClient, webPagesLlmClient),
           filter: async (candidates, cfg) => {
             // First filter out already-seen candidates
             const unseen = filterSeenCandidates(candidates, state);
