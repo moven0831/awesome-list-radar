@@ -20,7 +20,7 @@ describe("parseConfig", () => {
     expect(config.sources.blogs?.feeds).toHaveLength(1);
     expect(config.classification.model).toBe("claude-sonnet-4-6");
     expect(config.classification.threshold).toBe(70);
-    expect(config.classification.max_issues_per_run).toBe(5);
+    expect(config.classification.max_classifications_per_run).toBe(5);
     expect(config.issue_template.labels).toEqual(["radar", "needs-review"]);
   });
 
@@ -32,7 +32,7 @@ describe("parseConfig", () => {
     expect(config.sources.github?.min_stars).toBe(0);
     expect(config.sources.github?.created_after).toBe("30d");
     expect(config.classification.threshold).toBe(70);
-    expect(config.classification.max_issues_per_run).toBe(5);
+    expect(config.classification.max_classifications_per_run).toBe(5);
     expect(config.issue_template.labels).toEqual(["radar", "needs-review"]);
   });
 
@@ -153,5 +153,223 @@ issue_template:
     expect(config.issue_template.title_prefix).toBe("[New]");
     expect(config.issue_template.include_fields).toEqual(["url", "stars"]);
     expect(config.issue_template.suggested_entry_format).toBe("- [{{name}}]({{url}})");
+  });
+
+  it("supports max_classifications_per_run replacing max_issues_per_run", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_classifications_per_run: 10
+`);
+    expect(config.classification.max_classifications_per_run).toBe(10);
+  });
+
+  it("supports max_issues_per_run as deprecated alias", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_issues_per_run: 8
+`);
+    expect(config.classification.max_classifications_per_run).toBe(8);
+  });
+
+  it("prefers max_classifications_per_run over max_issues_per_run", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_classifications_per_run: 10
+  max_issues_per_run: 8
+`);
+    expect(config.classification.max_classifications_per_run).toBe(10);
+  });
+
+  it("defaults max_classifications_per_run to 5 when neither is set", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.max_classifications_per_run).toBe(5);
+  });
+
+  it("accepts optional max_budget_usd", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+classification:
+  max_budget_usd: 0.50
+`);
+    expect(config.classification.max_budget_usd).toBe(0.5);
+  });
+
+  it("allows max_budget_usd to be omitted", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.classification.max_budget_usd).toBeUndefined();
+  });
+
+  it("parses arxiv max_results and date_range", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+    max_results: 100
+    date_range:
+      start: "20240101"
+      end: "20240131"
+`);
+    expect(config.sources.arxiv?.max_results).toBe(100);
+    expect(config.sources.arxiv?.date_range).toEqual({
+      start: "20240101",
+      end: "20240131",
+    });
+  });
+
+  it("applies arxiv max_results default of 50", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+`);
+    expect(config.sources.arxiv?.max_results).toBe(50);
+    expect(config.sources.arxiv?.date_range).toBeUndefined();
+  });
+
+  it("rejects arxiv max_results out of range", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  arxiv:
+    categories:
+      - cs.CR
+    keywords:
+      - GPU
+    max_results: 1000
+`)
+    ).toThrow();
+  });
+
+  it("applies defaults for new github fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+`);
+    expect(config.sources.github?.max_results).toBe(100);
+    expect(config.sources.github?.sort).toBe("stars");
+    expect(config.sources.github?.exclude_forks).toBe(false);
+    expect(config.sources.github?.exclude_archived).toBe(false);
+  });
+
+  it("parses explicit github config fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 500
+    sort: updated
+    exclude_forks: true
+    exclude_archived: true
+`);
+    expect(config.sources.github?.max_results).toBe(500);
+    expect(config.sources.github?.sort).toBe("updated");
+    expect(config.sources.github?.exclude_forks).toBe(true);
+    expect(config.sources.github?.exclude_archived).toBe(true);
+  });
+
+  it("rejects max_results greater than 1000", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 1001
+`)
+    ).toThrow();
+  });
+
+  it("rejects max_results of 0", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+    max_results: 0
+`)
+    ).toThrow();
+  });
+
+  it("parses web_pages new config fields with defaults", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+`);
+    expect(config.sources.web_pages?.model).toBe("claude-haiku-4-5-20251001");
+    expect(config.sources.web_pages?.request_timeout).toBe(30000);
+    expect(config.sources.web_pages?.extraction_prompt).toBeUndefined();
+    expect(config.sources.web_pages?.user_agent).toBeUndefined();
+  });
+
+  it("parses web_pages custom config fields", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    extraction_prompt: "Custom prompt"
+    model: "claude-sonnet-4-6"
+    request_timeout: 60000
+    user_agent: "MyBot/1.0"
+`);
+    expect(config.sources.web_pages?.extraction_prompt).toBe("Custom prompt");
+    expect(config.sources.web_pages?.model).toBe("claude-sonnet-4-6");
+    expect(config.sources.web_pages?.request_timeout).toBe(60000);
+    expect(config.sources.web_pages?.user_agent).toBe("MyBot/1.0");
+  });
+
+  it("rejects web_pages request_timeout out of range", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  web_pages:
+    urls:
+      - https://example.com/blog
+    request_timeout: 500
+`)
+    ).toThrow();
   });
 });

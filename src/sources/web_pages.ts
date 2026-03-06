@@ -3,6 +3,7 @@ import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate } from "./types";
 import { matchesKeywords } from "./blogs";
+import { withRetry } from "../utils/retry";
 
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_HTML_LENGTH = 15_000;
@@ -83,6 +84,8 @@ export async function collectWebPages(
 
   const webPages = config.sources.web_pages;
   const fetcher = fetchFn ?? fetch;
+  const timeout = webPages.request_timeout;
+  const userAgent = webPages.user_agent;
   const anthropic =
     client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
 
@@ -90,26 +93,39 @@ export async function collectWebPages(
     webPages.urls.map(async (pageUrl) => {
       core.info(`Fetching web page: ${pageUrl}`);
 
-      const response = await fetcher(pageUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${pageUrl}`);
+      const fetchOptions: RequestInit = {
+        signal: AbortSignal.timeout(timeout),
+      };
+      if (userAgent) {
+        fetchOptions.headers = { "User-Agent": userAgent };
       }
+      const response = await withRetry(async () => {
+        const res = await fetcher(pageUrl, fetchOptions);
+        if (!res.ok) {
+          throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
+            status: res.status,
+          });
+        }
+        return res;
+      });
       const html = await response.text();
       const cleaned = cleanHtml(html);
 
       core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
 
-      const message = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: "user",
-            content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
-          },
-        ],
-      });
+      const message = await withRetry(() =>
+        anthropic.messages.create({
+          model: webPages.model,
+          max_tokens: 4096,
+          system: webPages.extraction_prompt || SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
+            },
+          ],
+        })
+      );
 
       const text =
         message.content[0].type === "text" ? message.content[0].text : "[]";

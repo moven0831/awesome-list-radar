@@ -45824,7 +45824,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.SYSTEM_PROMPT = void 0;
+exports.SYSTEM_PROMPT = exports.MODEL_PRICING = void 0;
+exports.estimateCost = estimateCost;
 exports.classifyCandidates = classifyCandidates;
 exports.buildUserPrompt = buildUserPrompt;
 exports.parseClassifyResponse = parseClassifyResponse;
@@ -45832,6 +45833,7 @@ exports.extractFirstJson = extractFirstJson;
 exports.sanitize = sanitize;
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
+const retry_1 = __nccwpck_require__(5931);
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
 belongs in the list.
@@ -45927,6 +45929,19 @@ function parseClassifyResponse(text) {
         reasoning: String(parsed.reasoning ?? ""),
     };
 }
+exports.MODEL_PRICING = {
+    "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
+    "claude-haiku-4-5-20251001": { inputPer1M: 0.8, outputPer1M: 4.0 },
+    "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
+};
+function estimateCost(inputTokens, outputTokens, model) {
+    const pricing = exports.MODEL_PRICING[model];
+    if (!pricing) {
+        core.warning(`No pricing found for model "${model}"; falling back to claude-sonnet-4-6 pricing. Cost estimates may be inaccurate.`);
+    }
+    const effectivePricing = pricing ?? exports.MODEL_PRICING["claude-sonnet-4-6"];
+    return (inputTokens * effectivePricing.inputPer1M + outputTokens * effectivePricing.outputPer1M) / 1_000_000;
+}
 // Caps the number of LLM API calls per run. Candidates beyond this
 // limit are not classified. This controls API cost, not the final
 // number of issues created (which may be lower after threshold filtering).
@@ -45934,19 +45949,36 @@ async function classifyCandidates(candidates, config, client) {
     if (candidates.length === 0)
         return [];
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
-    const maxClassifications = config.classification.max_issues_per_run;
+    const maxClassifications = config.classification.max_classifications_per_run;
+    const maxBudget = config.classification.max_budget_usd;
     const toClassify = candidates.slice(0, maxClassifications);
     const classified = [];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCost = 0;
     for (const candidate of toClassify) {
+        // Budget check before each call
+        if (maxBudget !== undefined && totalCost >= maxBudget) {
+            core.warning(`Budget limit reached ($${totalCost.toFixed(4)} >= $${maxBudget}). Skipping remaining ${toClassify.length - classified.length} candidates.`);
+            break;
+        }
         try {
-            const message = await anthropic.messages.create({
+            const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
                 model: config.classification.model,
                 max_tokens: 512,
                 system: SYSTEM_PROMPT,
                 messages: [
                     { role: "user", content: buildUserPrompt(candidate, config) },
                 ],
-            });
+            }));
+            // Track token usage
+            const inputTokens = message.usage?.input_tokens ?? 0;
+            const outputTokens = message.usage?.output_tokens ?? 0;
+            const cost = estimateCost(inputTokens, outputTokens, config.classification.model);
+            totalInputTokens += inputTokens;
+            totalOutputTokens += outputTokens;
+            totalCost += cost;
+            core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
             const text = message.content[0].type === "text" ? message.content[0].text : "";
             const result = parseClassifyResponse(text);
             if (result.relevanceScore >= config.classification.threshold) {
@@ -45960,6 +45992,8 @@ async function classifyCandidates(candidates, config, client) {
             core.warning(`Classification failed for "${candidate.title}": ${error instanceof Error ? error.message : String(error)}`);
         }
     }
+    // Log summary
+    core.info(`Classification summary: ${totalInputTokens} input tokens, ${totalOutputTokens} output tokens, estimated cost: $${totalCost.toFixed(4)}`);
     return classified;
 }
 
@@ -45986,10 +46020,28 @@ const GithubSourceSchema = zod_1.z.object({
         .string()
         .regex(/^\d+d$/, 'Must be in format "Nd" (e.g. "30d")')
         .default("30d"),
+    max_results: zod_1.z.number().int().min(1).max(1000).default(100),
+    sort: zod_1.z.enum(["stars", "updated", "best-match"]).default("stars"),
+    exclude_forks: zod_1.z.boolean().default(false),
+    exclude_archived: zod_1.z.boolean().default(false),
 });
 const ArxivSourceSchema = zod_1.z.object({
     categories: zod_1.z.array(zod_1.z.string()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).min(1),
+    max_results: zod_1.z.number().int().min(1).max(500).default(50),
+    date_range: zod_1.z
+        .object({
+        start: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+        end: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+        .refine((r) => r.start <= r.end, {
+        message: "date_range.start must be <= date_range.end",
+    })
+        .optional(),
 });
 const BlogsSourceSchema = zod_1.z.object({
     feeds: zod_1.z.array(zod_1.z.string().url()).min(1),
@@ -45998,6 +46050,10 @@ const BlogsSourceSchema = zod_1.z.object({
 const WebPagesSourceSchema = zod_1.z.object({
     urls: zod_1.z.array(zod_1.z.string().url()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).optional(),
+    extraction_prompt: zod_1.z.string().min(1).optional(),
+    model: zod_1.z.string().min(1).default("claude-haiku-4-5-20251001"),
+    request_timeout: zod_1.z.number().int().min(1000).max(120000).default(30000),
+    user_agent: zod_1.z.string().optional(),
 });
 const SourcesSchema = zod_1.z.object({
     github: GithubSourceSchema.optional(),
@@ -46008,8 +46064,13 @@ const SourcesSchema = zod_1.z.object({
 const ClassificationSchema = zod_1.z.object({
     model: zod_1.z.string().default("claude-sonnet-4-6"),
     threshold: zod_1.z.number().min(0).max(100).default(70),
-    max_issues_per_run: zod_1.z.number().int().positive().default(5),
-});
+    max_classifications_per_run: zod_1.z.number().int().positive().optional(),
+    max_issues_per_run: zod_1.z.number().int().positive().optional(), // deprecated alias
+    max_budget_usd: zod_1.z.number().positive().optional(),
+}).transform((val) => ({
+    ...val,
+    max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
+}));
 const IssueTemplateSchema = zod_1.z.object({
     labels: zod_1.z.array(zod_1.z.string()).default(["radar", "needs-review"]),
     title_prefix: zod_1.z.string().default("[Radar]"),
@@ -46335,6 +46396,7 @@ exports.escapeTableCell = escapeTableCell;
 exports.renderTemplate = renderTemplate;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const retry_1 = __nccwpck_require__(5931);
 function escapeTableCell(value) {
     return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
@@ -46442,7 +46504,7 @@ async function createIssues(candidates, config, dryRun, client) {
     // Fetch existing issues for idempotency check
     let existingIssues = [];
     try {
-        existingIssues = await issueClient.listIssues(labels);
+        existingIssues = await (0, retry_1.withRetry)(() => issueClient.listIssues(labels));
     }
     catch (error) {
         core.warning(`Could not fetch existing issues: ${error instanceof Error ? error.message : String(error)}`);
@@ -46469,7 +46531,7 @@ async function createIssues(candidates, config, dryRun, client) {
             continue;
         }
         try {
-            const issue = await issueClient.createIssue(title, body, labels);
+            const issue = await (0, retry_1.withRetry)(() => issueClient.createIssue(title, body, labels));
             core.info(`Created issue #${issue.number}: ${issue.html_url}`);
             created++;
         }
@@ -46591,6 +46653,7 @@ exports.buildArxivQuery = buildArxivQuery;
 exports.buildArxivUrl = buildArxivUrl;
 const core = __importStar(__nccwpck_require__(7484));
 const fast_xml_parser_1 = __nccwpck_require__(9741);
+const retry_1 = __nccwpck_require__(5931);
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;
 function buildArxivQuery(config) {
@@ -46599,13 +46662,17 @@ function buildArxivQuery(config) {
     const catQuery = catParts.length > 1 ? `(${catParts.join(" OR ")})` : catParts[0];
     const kwParts = arxiv.keywords.map((kw) => `all:"${kw}"`);
     const kwQuery = kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
-    return `${catQuery} AND ${kwQuery}`;
+    let query = `${catQuery} AND ${kwQuery}`;
+    if (arxiv.date_range) {
+        query += ` AND submittedDate:[${arxiv.date_range.start} TO ${arxiv.date_range.end}]`;
+    }
+    return query;
 }
-function buildArxivUrl(query) {
+function buildArxivUrl(query, maxResults = 50) {
     const url = new URL(ARXIV_API_URL);
     url.searchParams.set("search_query", query);
     url.searchParams.set("start", "0");
-    url.searchParams.set("max_results", "50");
+    url.searchParams.set("max_results", String(maxResults));
     url.searchParams.set("sortBy", "submittedDate");
     url.searchParams.set("sortOrder", "descending");
     return url.toString();
@@ -46620,14 +46687,18 @@ async function collectArxiv(config, fetchFn = fetch) {
     if (!config.sources.arxiv)
         return [];
     const query = buildArxivQuery(config);
-    const url = buildArxivUrl(query);
+    const url = buildArxivUrl(query, config.sources.arxiv.max_results);
     core.info(`arXiv query URL: ${url}`);
     try {
-        const response = await fetchFn(url);
-        if (!response.ok) {
-            core.warning(`arXiv API returned ${response.status}`);
-            return [];
-        }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetchFn(url);
+            if (!res.ok) {
+                throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const xml = await response.text();
         const parser = new fast_xml_parser_1.XMLParser({
             ignoreAttributes: false,
@@ -46709,6 +46780,7 @@ exports.collectBlogs = collectBlogs;
 exports.matchesKeywords = matchesKeywords;
 const core = __importStar(__nccwpck_require__(7484));
 const rss_parser_1 = __importDefault(__nccwpck_require__(4208));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function matchesKeywords(text, keywords) {
     const lower = text.toLowerCase();
@@ -46721,7 +46793,7 @@ async function collectBlogs(config, parser) {
     const blogs = config.sources.blogs;
     const results = await Promise.allSettled(blogs.feeds.map(async (feedUrl) => {
         core.info(`Fetching feed: ${feedUrl}`);
-        return { feedUrl, feed: await rssParser.parseURL(feedUrl) };
+        return { feedUrl, feed: await (0, retry_1.withRetry)(() => rssParser.parseURL(feedUrl)) };
     }));
     const candidates = [];
     for (const result of results) {
@@ -46801,6 +46873,7 @@ exports.buildSearchQuery = buildSearchQuery;
 exports.createdAfterDate = createdAfterDate;
 const rest_1 = __nccwpck_require__(4613);
 const core = __importStar(__nccwpck_require__(7484));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function createdAfterDate(spec) {
     const days = parseInt(spec.replace("d", ""), 10);
@@ -46827,6 +46900,15 @@ function buildSearchQuery(topics, config) {
     }
     const after = createdAfterDate(gh.created_after);
     parts.push(`created:>=${after}`);
+    if (gh.exclude_forks) {
+        parts.push("fork:false");
+    }
+    else {
+        parts.push("fork:true");
+    }
+    if (gh.exclude_archived) {
+        parts.push("archived:false");
+    }
     return parts.join(" ");
 }
 async function collectGitHub(config, octokit) {
@@ -46837,33 +46919,45 @@ async function collectGitHub(config, octokit) {
     core.info(`GitHub search query: ${query}`);
     const candidates = [];
     try {
-        // Note: fetches a single page (100 results) sorted by stars.
-        // GitHub Search API supports up to 1000 results via pagination,
-        // but for a radar scan the top 100 by stars is sufficient.
-        const response = await client.search.repos({
-            q: query,
-            sort: "stars",
-            order: "desc",
-            per_page: 100,
-        });
-        for (const repo of response.data.items) {
-            candidates.push({
-                url: repo.html_url,
-                title: repo.full_name,
-                description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
-                source: "github",
-                metadata: {
-                    stars: repo.stargazers_count,
-                    language: repo.language ?? undefined,
-                    topics: repo.topics ?? [],
-                    license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
-                    archived: repo.archived ?? undefined,
-                    fork: repo.fork ?? undefined,
-                    owner: repo.owner?.login ?? undefined,
-                    homepage: repo.homepage || undefined,
-                    lastPushedAt: repo.pushed_at ?? undefined,
-                },
-            });
+        const gh = config.sources.github;
+        const maxResults = gh.max_results;
+        let page = 1;
+        let fetched = 0;
+        while (fetched < maxResults) {
+            const remaining = maxResults - fetched;
+            const perPage = Math.min(remaining, 100);
+            const response = await (0, retry_1.withRetry)(() => client.search.repos({
+                q: query,
+                sort: gh.sort === "best-match" ? undefined : gh.sort,
+                order: "desc",
+                per_page: perPage,
+                page,
+            }));
+            for (const repo of response.data.items) {
+                if (fetched >= maxResults)
+                    break;
+                candidates.push({
+                    url: repo.html_url,
+                    title: repo.full_name,
+                    description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
+                    source: "github",
+                    metadata: {
+                        stars: repo.stargazers_count,
+                        language: repo.language ?? undefined,
+                        topics: repo.topics ?? [],
+                        license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
+                        archived: repo.archived ?? undefined,
+                        fork: repo.fork ?? undefined,
+                        owner: repo.owner?.login ?? undefined,
+                        homepage: repo.homepage || undefined,
+                        lastPushedAt: repo.pushed_at ?? undefined,
+                    },
+                });
+                fetched++;
+            }
+            if (response.data.items.length < perPage || fetched >= response.data.total_count)
+                break;
+            page++;
         }
     }
     catch (error) {
@@ -46924,6 +47018,7 @@ exports.collectWebPages = collectWebPages;
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
 const blogs_1 = __nccwpck_require__(4731);
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_HTML_LENGTH = 15_000;
 const SYSTEM_PROMPT = `You are an article link extractor. Given the cleaned text of a web page, extract all article or blog post links you can find.
@@ -46988,27 +47083,40 @@ async function collectWebPages(config, fetchFn, client) {
         return [];
     const webPages = config.sources.web_pages;
     const fetcher = fetchFn ?? fetch;
+    const timeout = webPages.request_timeout;
+    const userAgent = webPages.user_agent;
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
     const results = await Promise.allSettled(webPages.urls.map(async (pageUrl) => {
         core.info(`Fetching web page: ${pageUrl}`);
-        const response = await fetcher(pageUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} for ${pageUrl}`);
+        const fetchOptions = {
+            signal: AbortSignal.timeout(timeout),
+        };
+        if (userAgent) {
+            fetchOptions.headers = { "User-Agent": userAgent };
         }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetcher(pageUrl, fetchOptions);
+            if (!res.ok) {
+                throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const html = await response.text();
         const cleaned = cleanHtml(html);
         core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
-        const message = await anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
+        const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
+            model: webPages.model,
             max_tokens: 4096,
-            system: SYSTEM_PROMPT,
+            system: webPages.extraction_prompt || SYSTEM_PROMPT,
             messages: [
                 {
                     role: "user",
                     content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
                 },
             ],
-        });
+        }));
         const text = message.content[0].type === "text" ? message.content[0].text : "[]";
         const links = extractFirstJsonArray(text);
         // Resolve relative URLs
@@ -47046,6 +47154,117 @@ async function collectWebPages(config, fetchFn, client) {
         }
     }
     return candidates;
+}
+
+
+/***/ }),
+
+/***/ 5931:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withRetry = withRetry;
+const core = __importStar(__nccwpck_require__(7484));
+function getRetryDelay(attempt, options) {
+    const exponential = options.baseDelay * Math.pow(2, attempt);
+    const jitter = Math.random() * options.baseDelay;
+    return Math.min(exponential + jitter, options.maxDelay);
+}
+function getRateLimitDelay(error) {
+    const headers = error.response?.headers;
+    if (!headers)
+        return null;
+    const retryAfter = headers.get("retry-after");
+    if (retryAfter) {
+        const seconds = parseInt(retryAfter, 10);
+        if (!isNaN(seconds))
+            return seconds * 1000;
+        const date = new Date(retryAfter).getTime();
+        if (!isNaN(date))
+            return Math.max(0, date - Date.now());
+    }
+    const rateLimitReset = headers.get("x-ratelimit-reset");
+    if (rateLimitReset) {
+        const resetTime = parseInt(rateLimitReset, 10) * 1000;
+        return Math.max(0, resetTime - Date.now());
+    }
+    return null;
+}
+function isRetryable(error, retryableStatuses) {
+    if (error instanceof Error) {
+        const retryable = error;
+        const status = retryable.status ?? retryable.response?.status;
+        if (status && retryableStatuses.includes(status))
+            return true;
+        if (retryable.message.includes("ECONNRESET") ||
+            retryable.message.includes("ETIMEDOUT") ||
+            retryable.message.includes("ENOTFOUND") ||
+            retryable.message.includes("fetch failed")) {
+            return true;
+        }
+    }
+    return false;
+}
+async function withRetry(fn, options) {
+    const opts = {
+        maxRetries: options?.maxRetries ?? 3,
+        baseDelay: options?.baseDelay ?? 1000,
+        maxDelay: options?.maxDelay ?? 30000,
+        retryableStatuses: options?.retryableStatuses ?? [
+            408, 429, 500, 502, 503, 504,
+        ],
+    };
+    for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+        try {
+            return await fn();
+        }
+        catch (error) {
+            if (attempt === opts.maxRetries ||
+                !isRetryable(error, opts.retryableStatuses)) {
+                throw error;
+            }
+            const rateLimitDelay = getRateLimitDelay(error);
+            const delay = Math.min(rateLimitDelay ?? getRetryDelay(attempt, opts), opts.maxDelay);
+            core.info(`Retry ${attempt + 1}/${opts.maxRetries} after ${Math.round(delay)}ms: ${error instanceof Error ? error.message : String(error)}`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+    }
+    throw new Error("Unreachable: retry loop exited without return or throw");
 }
 
 
