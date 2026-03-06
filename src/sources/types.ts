@@ -14,6 +14,12 @@ export interface CandidateMetadata {
   publishedAt?: string;
   feedName?: string;
   pageName?: string;
+  license?: string;
+  archived?: boolean;
+  fork?: boolean;
+  owner?: string;
+  homepage?: string;
+  lastPushedAt?: string;
 }
 
 export interface ClassifiedCandidate extends Candidate {

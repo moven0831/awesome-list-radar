@@ -122,9 +122,9 @@ describe("buildSearchQuery", () => {
     expect(query).toContain("archived:false");
   });
 
-  it("does not append fork:false or archived:false by default", () => {
+  it("includes fork:true by default to include forks in results", () => {
     const query = buildSearchQuery(baseConfig.sources.github!.topics, baseConfig);
-    expect(query).not.toContain("fork:");
+    expect(query).toContain("fork:true");
     expect(query).not.toContain("archived:");
   });
 });
@@ -143,6 +143,12 @@ describe("collectGitHub", () => {
                 stargazers_count: 42,
                 language: "Rust",
                 topics: ["webgpu", "crypto"],
+                license: { spdx_id: "MIT" },
+                archived: false,
+                fork: false,
+                owner: { login: "test" },
+                homepage: "https://example.com",
+                pushed_at: "2025-01-15T00:00:00Z",
               },
               {
                 html_url: "https://github.com/test/repo2",
@@ -151,6 +157,12 @@ describe("collectGitHub", () => {
                 stargazers_count: 10,
                 language: null,
                 topics: [],
+                license: null,
+                archived: false,
+                fork: true,
+                owner: { login: "test" },
+                homepage: "",
+                pushed_at: "2025-01-10T00:00:00Z",
               },
             ],
           },
@@ -170,10 +182,22 @@ describe("collectGitHub", () => {
         stars: 42,
         language: "Rust",
         topics: ["webgpu", "crypto"],
+        license: "MIT",
+        archived: false,
+        fork: false,
+        owner: "test",
+        homepage: "https://example.com",
+        lastPushedAt: "2025-01-15T00:00:00Z",
       },
     });
     expect(candidates[1].description).toBe("");
     expect(candidates[1].metadata.language).toBeUndefined();
+    expect(candidates[1].metadata.license).toBeUndefined();
+    expect(candidates[1].metadata.homepage).toBeUndefined();
+    expect(candidates[1].metadata.fork).toBe(true);
+    expect(candidates[1].metadata.owner).toBe("test");
+    expect(candidates[1].metadata.archived).toBe(false);
+    expect(candidates[1].metadata.lastPushedAt).toBe("2025-01-10T00:00:00Z");
   });
 
   it("returns empty array when github source is not configured", async () => {
