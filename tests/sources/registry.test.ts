@@ -311,6 +311,77 @@ describe("collectRegistries", () => {
     expect(candidates).toEqual([]);
   });
 
+  it("warns when min_downloads is set for npm", async () => {
+    const core = await import("@actions/core");
+    const config = {
+      ...baseConfig,
+      sources: {
+        registries: [
+          {
+            type: "npm" as const,
+            keywords: ["webgpu"],
+            min_downloads: 1000,
+            max_results: 50,
+          },
+        ],
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          objects: [
+            {
+              package: {
+                name: "webgpu-utils",
+                description: "Utility library",
+                date: "2024-01-15T00:00:00Z",
+              },
+            },
+          ],
+        }),
+    });
+
+    const candidates = await collectRegistries(config, mockFetch as any);
+    expect(candidates).toHaveLength(1);
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining("min_downloads is not supported for npm")
+    );
+  });
+
+  it("warns when min_downloads is set for PyPI", async () => {
+    const core = await import("@actions/core");
+    const config = {
+      ...baseConfig,
+      sources: {
+        registries: [
+          {
+            type: "pypi" as const,
+            keywords: ["torch"],
+            min_downloads: 1000,
+            max_results: 50,
+          },
+        ],
+      },
+    } as RadarConfig;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          info: { name: "torch", summary: "Tensors" },
+          urls: [{ upload_time_iso_8601: "2024-02-01T00:00:00Z" }],
+        }),
+    });
+
+    const candidates = await collectRegistries(config, mockFetch as any);
+    expect(candidates).toHaveLength(1);
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining("min_downloads is not supported for PyPI")
+    );
+  });
+
   it("truncates long descriptions", async () => {
     const longDesc = "x".repeat(2000);
     const mockFetch = vi.fn().mockResolvedValue({

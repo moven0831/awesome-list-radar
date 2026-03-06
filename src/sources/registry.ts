@@ -23,13 +23,15 @@ async function collectNpm(
     return [];
   }
 
+  if (entry.min_downloads > 0) {
+    core.warning(
+      `min_downloads is not supported for npm (search API lacks download counts) and will be ignored`
+    );
+  }
+
   const data = (await response.json()) as any;
   for (const result of data.objects ?? []) {
     const pkg = result.package;
-
-    if (entry.min_downloads > 0 && (result.downloads?.monthly ?? 0) < entry.min_downloads) {
-      continue;
-    }
 
     candidates.push({
       url: `https://www.npmjs.com/package/${pkg.name}`,
@@ -51,6 +53,12 @@ async function collectPyPI(
   fetchFn: typeof fetch
 ): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
+
+  if (entry.min_downloads > 0) {
+    core.warning(
+      `min_downloads is not supported for PyPI and will be ignored`
+    );
+  }
 
   for (const keyword of entry.keywords) {
     const url = `https://pypi.org/pypi/${encodeURIComponent(keyword)}/json`;

@@ -47200,12 +47200,12 @@ async function collectNpm(entry, fetchFn) {
         core.warning(`npm search failed: HTTP ${response.status}`);
         return [];
     }
+    if (entry.min_downloads > 0) {
+        core.warning(`min_downloads is not supported for npm (search API lacks download counts) and will be ignored`);
+    }
     const data = (await response.json());
     for (const result of data.objects ?? []) {
         const pkg = result.package;
-        if (entry.min_downloads > 0 && (result.downloads?.monthly ?? 0) < entry.min_downloads) {
-            continue;
-        }
         candidates.push({
             url: `https://www.npmjs.com/package/${pkg.name}`,
             title: pkg.name,
@@ -47221,6 +47221,9 @@ async function collectNpm(entry, fetchFn) {
 }
 async function collectPyPI(entry, fetchFn) {
     const candidates = [];
+    if (entry.min_downloads > 0) {
+        core.warning(`min_downloads is not supported for PyPI and will be ignored`);
+    }
     for (const keyword of entry.keywords) {
         const url = `https://pypi.org/pypi/${encodeURIComponent(keyword)}/json`;
         try {
