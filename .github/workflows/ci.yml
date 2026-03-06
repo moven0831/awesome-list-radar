@@ -40,4 +40,3 @@ jobs:
       - name: Verify dist/ is up to date
         run: |
           git diff --exit-code dist/ || (echo "dist/ is out of date. Run 'bun run build' and commit." && exit 1)
-
