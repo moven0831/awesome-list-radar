@@ -1,7 +1,13 @@
+import { readFileSync } from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate, ClassifiedCandidate } from "../sources/types";
+import {
+  extractCategories,
+  formatCategoryTree,
+} from "../utils/parse_list";
+import { withRetry } from "../utils/retry";
 
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
@@ -23,17 +29,29 @@ function sanitize(text: string, maxLength: number): string {
   return text.slice(0, maxLength).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
-function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
+function buildUserPrompt(
+  candidate: Candidate,
+  config: RadarConfig,
+  categoryTree?: string
+): string {
+  const maxDescLen = config.classification.max_description_length;
   const parts = [
     `## List Description`,
     config.description,
+  ];
+
+  if (config.classification.context) {
+    parts.push(``, `## Additional Context`, config.classification.context);
+  }
+
+  parts.push(
     ``,
     `## Candidate`,
     `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`,
     `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`,
     `<candidate_source>${candidate.source}</candidate_source>`,
-    `<candidate_description>${sanitize(candidate.description, 500)}</candidate_description>`,
-  ];
+    `<candidate_description>${sanitize(candidate.description, maxDescLen)}</candidate_description>`
+  );
 
   if (candidate.metadata.stars !== undefined) {
     parts.push(`<candidate_stars>${candidate.metadata.stars}</candidate_stars>`);
@@ -84,8 +102,36 @@ function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
     );
   }
 
+  if (categoryTree) {
+    parts.push(
+      ``,
+      `## Available Categories`,
+      categoryTree,
+      ``,
+      `Pick the most appropriate category from the list above.`
+    );
+  }
+
   parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
   return parts.join("\n");
+}
+
+function loadCategoryTree(config: RadarConfig): string | undefined {
+  // Explicit categories take priority
+  if (config.classification.categories?.length) {
+    return config.classification.categories.map((c) => `- ${c}`).join("\n");
+  }
+
+  // Auto-extract from list file
+  try {
+    const content = readFileSync(config.list_file, "utf-8");
+    const nodes = extractCategories(content);
+    if (nodes.length === 0) return undefined;
+    return formatCategoryTree(nodes);
+  } catch {
+    // File doesn't exist or can't be read — skip gracefully
+    return undefined;
+  }
 }
 
 interface ClassifyResult {
@@ -129,6 +175,25 @@ function parseClassifyResponse(text: string): ClassifyResult {
   };
 }
 
+export const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
+  "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
+  "claude-haiku-4-5-20251001": { inputPer1M: 0.8, outputPer1M: 4.0 },
+  "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
+};
+
+export function estimateCost(
+  inputTokens: number,
+  outputTokens: number,
+  model: string
+): number {
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) {
+    core.warning(`No pricing found for model "${model}"; falling back to claude-sonnet-4-6 pricing. Cost estimates may be inaccurate.`);
+  }
+  const effectivePricing = pricing ?? MODEL_PRICING["claude-sonnet-4-6"];
+  return (inputTokens * effectivePricing.inputPer1M + outputTokens * effectivePricing.outputPer1M) / 1_000_000;
+}
+
 // Caps the number of LLM API calls per run. Candidates beyond this
 // limit are not classified. This controls API cost, not the final
 // number of issues created (which may be lower after threshold filtering).
@@ -142,20 +207,50 @@ export async function classifyCandidates(
   const anthropic =
     client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
 
-  const maxClassifications = config.classification.max_issues_per_run;
+  const maxClassifications = config.classification.max_classifications_per_run;
+  const maxBudget = config.classification.max_budget_usd;
   const toClassify = candidates.slice(0, maxClassifications);
   const classified: ClassifiedCandidate[] = [];
+  const systemPrompt = config.classification.system_prompt ?? SYSTEM_PROMPT;
+  const categoryTree = loadCategoryTree(config);
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCost = 0;
 
   for (const candidate of toClassify) {
+    // Budget check before each call
+    if (maxBudget !== undefined && totalCost >= maxBudget) {
+      core.warning(`Budget limit reached ($${totalCost.toFixed(4)} >= $${maxBudget}). Skipping remaining ${toClassify.length - classified.length} candidates.`);
+      break;
+    }
+
     try {
-      const message = await anthropic.messages.create({
-        model: config.classification.model,
-        max_tokens: 512,
-        system: SYSTEM_PROMPT,
-        messages: [
-          { role: "user", content: buildUserPrompt(candidate, config) },
-        ],
-      });
+      const message = await withRetry(() =>
+        anthropic.messages.create({
+          model: config.classification.model,
+          max_tokens: 512,
+          system: systemPrompt,
+          messages: [
+            {
+              role: "user",
+              content: buildUserPrompt(candidate, config, categoryTree),
+            },
+          ],
+        })
+      );
+
+      // Track token usage
+      const inputTokens = message.usage?.input_tokens ?? 0;
+      const outputTokens = message.usage?.output_tokens ?? 0;
+      const cost = estimateCost(inputTokens, outputTokens, config.classification.model);
+
+      totalInputTokens += inputTokens;
+      totalOutputTokens += outputTokens;
+      totalCost += cost;
+
+      core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
+
 
       const text =
         message.content[0].type === "text" ? message.content[0].text : "";
@@ -175,6 +270,9 @@ export async function classifyCandidates(
     }
   }
 
+  // Log summary
+  core.info(`Classification summary: ${totalInputTokens} input tokens, ${totalOutputTokens} output tokens, estimated cost: $${totalCost.toFixed(4)}`);
+
   return classified;
 }
 
@@ -183,5 +281,6 @@ export {
   parseClassifyResponse,
   extractFirstJson,
   sanitize,
+  loadCategoryTree,
   SYSTEM_PROMPT,
 };

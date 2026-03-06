@@ -45824,14 +45824,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.SYSTEM_PROMPT = void 0;
+exports.SYSTEM_PROMPT = exports.MODEL_PRICING = void 0;
+exports.estimateCost = estimateCost;
 exports.classifyCandidates = classifyCandidates;
 exports.buildUserPrompt = buildUserPrompt;
 exports.parseClassifyResponse = parseClassifyResponse;
 exports.extractFirstJson = extractFirstJson;
 exports.sanitize = sanitize;
+exports.loadCategoryTree = loadCategoryTree;
+const node_fs_1 = __nccwpck_require__(3024);
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
+const parse_list_1 = __nccwpck_require__(2953);
+const retry_1 = __nccwpck_require__(5931);
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
 Given the list's description and a candidate resource, assess whether the candidate
 belongs in the list.
@@ -45851,17 +45856,16 @@ exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
 function sanitize(text, maxLength) {
     return text.slice(0, maxLength).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
-function buildUserPrompt(candidate, config) {
+function buildUserPrompt(candidate, config, categoryTree) {
+    const maxDescLen = config.classification.max_description_length;
     const parts = [
         `## List Description`,
         config.description,
-        ``,
-        `## Candidate`,
-        `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`,
-        `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`,
-        `<candidate_source>${candidate.source}</candidate_source>`,
-        `<candidate_description>${sanitize(candidate.description, 500)}</candidate_description>`,
     ];
+    if (config.classification.context) {
+        parts.push(``, `## Additional Context`, config.classification.context);
+    }
+    parts.push(``, `## Candidate`, `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`, `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`, `<candidate_source>${candidate.source}</candidate_source>`, `<candidate_description>${sanitize(candidate.description, maxDescLen)}</candidate_description>`);
     if (candidate.metadata.stars !== undefined) {
         parts.push(`<candidate_stars>${candidate.metadata.stars}</candidate_stars>`);
     }
@@ -45892,8 +45896,29 @@ function buildUserPrompt(candidate, config) {
     if (candidate.metadata.lastPushedAt) {
         parts.push(`<candidate_last_pushed>${sanitize(candidate.metadata.lastPushedAt, 50)}</candidate_last_pushed>`);
     }
+    if (categoryTree) {
+        parts.push(``, `## Available Categories`, categoryTree, ``, `Pick the most appropriate category from the list above.`);
+    }
     parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
     return parts.join("\n");
+}
+function loadCategoryTree(config) {
+    // Explicit categories take priority
+    if (config.classification.categories?.length) {
+        return config.classification.categories.map((c) => `- ${c}`).join("\n");
+    }
+    // Auto-extract from list file
+    try {
+        const content = (0, node_fs_1.readFileSync)(config.list_file, "utf-8");
+        const nodes = (0, parse_list_1.extractCategories)(content);
+        if (nodes.length === 0)
+            return undefined;
+        return (0, parse_list_1.formatCategoryTree)(nodes);
+    }
+    catch {
+        // File doesn't exist or can't be read — skip gracefully
+        return undefined;
+    }
 }
 function extractFirstJson(text) {
     const start = text.indexOf("{");
@@ -45927,6 +45952,19 @@ function parseClassifyResponse(text) {
         reasoning: String(parsed.reasoning ?? ""),
     };
 }
+exports.MODEL_PRICING = {
+    "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
+    "claude-haiku-4-5-20251001": { inputPer1M: 0.8, outputPer1M: 4.0 },
+    "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
+};
+function estimateCost(inputTokens, outputTokens, model) {
+    const pricing = exports.MODEL_PRICING[model];
+    if (!pricing) {
+        core.warning(`No pricing found for model "${model}"; falling back to claude-sonnet-4-6 pricing. Cost estimates may be inaccurate.`);
+    }
+    const effectivePricing = pricing ?? exports.MODEL_PRICING["claude-sonnet-4-6"];
+    return (inputTokens * effectivePricing.inputPer1M + outputTokens * effectivePricing.outputPer1M) / 1_000_000;
+}
 // Caps the number of LLM API calls per run. Candidates beyond this
 // limit are not classified. This controls API cost, not the final
 // number of issues created (which may be lower after threshold filtering).
@@ -45934,19 +45972,41 @@ async function classifyCandidates(candidates, config, client) {
     if (candidates.length === 0)
         return [];
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
-    const maxClassifications = config.classification.max_issues_per_run;
+    const maxClassifications = config.classification.max_classifications_per_run;
+    const maxBudget = config.classification.max_budget_usd;
     const toClassify = candidates.slice(0, maxClassifications);
     const classified = [];
+    const systemPrompt = config.classification.system_prompt ?? SYSTEM_PROMPT;
+    const categoryTree = loadCategoryTree(config);
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCost = 0;
     for (const candidate of toClassify) {
+        // Budget check before each call
+        if (maxBudget !== undefined && totalCost >= maxBudget) {
+            core.warning(`Budget limit reached ($${totalCost.toFixed(4)} >= $${maxBudget}). Skipping remaining ${toClassify.length - classified.length} candidates.`);
+            break;
+        }
         try {
-            const message = await anthropic.messages.create({
+            const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
                 model: config.classification.model,
                 max_tokens: 512,
-                system: SYSTEM_PROMPT,
+                system: systemPrompt,
                 messages: [
-                    { role: "user", content: buildUserPrompt(candidate, config) },
+                    {
+                        role: "user",
+                        content: buildUserPrompt(candidate, config, categoryTree),
+                    },
                 ],
-            });
+            }));
+            // Track token usage
+            const inputTokens = message.usage?.input_tokens ?? 0;
+            const outputTokens = message.usage?.output_tokens ?? 0;
+            const cost = estimateCost(inputTokens, outputTokens, config.classification.model);
+            totalInputTokens += inputTokens;
+            totalOutputTokens += outputTokens;
+            totalCost += cost;
+            core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
             const text = message.content[0].type === "text" ? message.content[0].text : "";
             const result = parseClassifyResponse(text);
             if (result.relevanceScore >= config.classification.threshold) {
@@ -45960,6 +46020,8 @@ async function classifyCandidates(candidates, config, client) {
             core.warning(`Classification failed for "${candidate.title}": ${error instanceof Error ? error.message : String(error)}`);
         }
     }
+    // Log summary
+    core.info(`Classification summary: ${totalInputTokens} input tokens, ${totalOutputTokens} output tokens, estimated cost: $${totalCost.toFixed(4)}`);
     return classified;
 }
 
@@ -45986,10 +46048,28 @@ const GithubSourceSchema = zod_1.z.object({
         .string()
         .regex(/^\d+d$/, 'Must be in format "Nd" (e.g. "30d")')
         .default("30d"),
+    max_results: zod_1.z.number().int().min(1).max(1000).default(100),
+    sort: zod_1.z.enum(["stars", "updated", "best-match"]).default("stars"),
+    exclude_forks: zod_1.z.boolean().default(false),
+    exclude_archived: zod_1.z.boolean().default(false),
 });
 const ArxivSourceSchema = zod_1.z.object({
     categories: zod_1.z.array(zod_1.z.string()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).min(1),
+    max_results: zod_1.z.number().int().min(1).max(500).default(50),
+    date_range: zod_1.z
+        .object({
+        start: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+        end: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+        .refine((r) => r.start <= r.end, {
+        message: "date_range.start must be <= date_range.end",
+    })
+        .optional(),
 });
 const BlogsSourceSchema = zod_1.z.object({
     feeds: zod_1.z.array(zod_1.z.string().url()).min(1),
@@ -45998,6 +46078,10 @@ const BlogsSourceSchema = zod_1.z.object({
 const WebPagesSourceSchema = zod_1.z.object({
     urls: zod_1.z.array(zod_1.z.string().url()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).optional(),
+    extraction_prompt: zod_1.z.string().min(1).optional(),
+    model: zod_1.z.string().min(1).default("claude-haiku-4-5-20251001"),
+    request_timeout: zod_1.z.number().int().min(1000).max(120000).default(30000),
+    user_agent: zod_1.z.string().optional(),
 });
 const RegistryEntrySchema = zod_1.z.object({
     type: zod_1.z.enum(["npm", "pypi", "crates"]),
@@ -46013,18 +46097,42 @@ const SourcesSchema = zod_1.z.object({
     web_pages: WebPagesSourceSchema.optional(),
     registries: RegistrySourceSchema.optional(),
 });
+const FilterSchema = zod_1.z
+    .object({
+    include: zod_1.z.array(zod_1.z.string()).optional(),
+    require_all: zod_1.z.array(zod_1.z.string()).optional(),
+    exclude: zod_1.z.array(zod_1.z.string()).optional(),
+    exclude_forks: zod_1.z.boolean().default(false),
+    exclude_archived: zod_1.z.boolean().default(false),
+    require_license: zod_1.z.boolean().default(false),
+    max_age_days: zod_1.z.number().int().positive().optional(),
+})
+    .default({});
 const ClassificationSchema = zod_1.z.object({
     model: zod_1.z.string().default("claude-sonnet-4-6"),
     threshold: zod_1.z.number().min(0).max(100).default(70),
-    max_issues_per_run: zod_1.z.number().int().positive().default(5),
-});
+    max_classifications_per_run: zod_1.z.number().int().positive().optional(),
+    max_issues_per_run: zod_1.z.number().int().positive().optional(), // deprecated alias
+    max_budget_usd: zod_1.z.number().positive().optional(),
+    system_prompt: zod_1.z.string().optional(),
+    context: zod_1.z.string().optional(),
+    max_description_length: zod_1.z.number().int().positive().max(10000).default(500),
+    categories: zod_1.z.array(zod_1.z.string()).optional(),
+}).transform((val) => ({
+    ...val,
+    max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,
+}));
 const IssueTemplateSchema = zod_1.z.object({
     labels: zod_1.z.array(zod_1.z.string()).default(["radar", "needs-review"]),
+    title_prefix: zod_1.z.string().default("[Radar]"),
+    include_fields: zod_1.z.array(zod_1.z.enum(["url", "source", "relevanceScore", "suggestedCategory", "tags", "stars", "language", "authors"])).optional(),
+    suggested_entry_format: zod_1.z.string().optional(),
 });
 exports.RadarConfigSchema = zod_1.z.object({
     description: zod_1.z.string().min(1),
     list_file: zod_1.z.string().default("README.md"),
     sources: SourcesSchema.refine((s) => s.github || s.arxiv || s.blogs || s.web_pages || s.registries, "At least one source must be configured"),
+    filter: FilterSchema,
     classification: ClassificationSchema.default({}),
     issue_template: IssueTemplateSchema.default({}),
 });
@@ -46079,19 +46187,42 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeUrl = normalizeUrl;
 exports.extractUrlsFromMarkdown = extractUrlsFromMarkdown;
 exports.dedup = dedup;
 const node_fs_1 = __nccwpck_require__(3024);
 const core = __importStar(__nccwpck_require__(7484));
 const URL_REGEX = /https?:\/\/[^\s\)>\]]+/g;
+function normalizeUrl(url) {
+    let normalized = url.toLowerCase();
+    // Remove protocol
+    normalized = normalized.replace(/^https?:\/\//, "");
+    // Remove www.
+    normalized = normalized.replace(/^www\./, "");
+    // Remove trailing slash
+    normalized = normalized.replace(/\/+$/, "");
+    // Remove tracking params
+    try {
+        const parsed = new URL("https://" + normalized);
+        const paramsToRemove = [...parsed.searchParams.keys()].filter((k) => k.startsWith("utm_") || k === "ref" || k === "source");
+        paramsToRemove.forEach((k) => parsed.searchParams.delete(k));
+        // Reconstruct without protocol
+        normalized = parsed.hostname + parsed.pathname + parsed.search;
+        normalized = normalized.replace(/\/+$/, "");
+    }
+    catch {
+        // If URL parsing fails, just use the lowercase version
+    }
+    return normalized;
+}
 function extractUrlsFromMarkdown(markdown) {
     const urls = new Set();
     const matches = markdown.match(URL_REGEX);
     if (matches) {
         for (const url of matches) {
-            // Normalize: remove trailing punctuation, lowercase
-            const cleaned = url.replace(/[.,;:!?]+$/, "").toLowerCase();
-            urls.add(cleaned);
+            // Remove trailing punctuation before normalizing
+            const cleaned = url.replace(/[.,;:!?]+$/, "");
+            urls.add(normalizeUrl(cleaned));
         }
     }
     return urls;
@@ -46106,7 +46237,7 @@ function dedup(candidates, config, readFileFn = node_fs_1.readFileSync) {
         core.warning(`Could not read list file "${config.list_file}", skipping dedup`);
         return candidates;
     }
-    const filtered = candidates.filter((c) => !existingUrls.has(c.url.toLowerCase()));
+    const filtered = candidates.filter((c) => !existingUrls.has(normalizeUrl(c.url)));
     core.info(`Dedup: ${candidates.length} → ${filtered.length} candidates (${existingUrls.size} existing URLs)`);
     return filtered;
 }
@@ -46156,6 +46287,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.filterCandidates = filterCandidates;
 exports.getAllKeywords = getAllKeywords;
 exports.matchesAnyKeyword = matchesAnyKeyword;
+exports.matchesAllKeywords = matchesAllKeywords;
 const core = __importStar(__nccwpck_require__(7484));
 function getAllKeywords(config) {
     const keywords = [];
@@ -46177,17 +46309,116 @@ function matchesAnyKeyword(text, keywords) {
     const lower = text.toLowerCase();
     return keywords.some((kw) => lower.includes(kw));
 }
+function matchesAllKeywords(text, keywords) {
+    const lower = text.toLowerCase();
+    return keywords.every((kw) => lower.includes(kw));
+}
+function getSearchText(c) {
+    return `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
+}
 function filterCandidates(candidates, config) {
-    const keywords = getAllKeywords(config);
-    if (keywords.length === 0) {
-        core.info("No keywords configured, passing all candidates through");
-        return candidates;
+    // Determine include keywords: prefer filter.include, fall back to source keywords
+    const includeKeywords = config.filter?.include?.map((kw) => kw.toLowerCase()) ??
+        getAllKeywords(config);
+    const requireAllKeywords = (config.filter?.require_all ?? []).map((kw) => kw.toLowerCase());
+    const excludeKeywords = config.filter?.exclude?.map((kw) => kw.toLowerCase()) ?? [];
+    let filtered = candidates;
+    // Step 1: include (OR match)
+    if (includeKeywords.length > 0) {
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return matchesAnyKeyword(searchText, includeKeywords);
+        });
+        core.info(`Include filter: ${candidates.length} → ${filtered.length} candidates`);
     }
+    else {
+        core.info("No keywords configured, passing all candidates through");
+    }
+    // Step 2: require_all (AND match)
+    if (requireAllKeywords.length > 0) {
+        const before = filtered.length;
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return matchesAllKeywords(searchText, requireAllKeywords);
+        });
+        core.info(`Require-all filter: ${before} → ${filtered.length} candidates`);
+    }
+    // Step 3: exclude (NOT match)
+    if (excludeKeywords.length > 0) {
+        const before = filtered.length;
+        filtered = filtered.filter((c) => {
+            const searchText = getSearchText(c);
+            return !matchesAnyKeyword(searchText, excludeKeywords);
+        });
+        core.info(`Exclude filter: ${before} → ${filtered.length} candidates`);
+    }
+    return filtered;
+}
+
+
+/***/ }),
+
+/***/ 445:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.filterByMetadata = filterByMetadata;
+const core = __importStar(__nccwpck_require__(7484));
+function filterByMetadata(candidates, config) {
+    const filter = config.filter;
     const filtered = candidates.filter((c) => {
-        const searchText = `${c.title} ${c.description} ${c.metadata.topics?.join(" ") ?? ""}`;
-        return matchesAnyKeyword(searchText, keywords);
+        if (filter.exclude_forks && c.metadata.fork === true)
+            return false;
+        if (filter.exclude_archived && c.metadata.archived === true)
+            return false;
+        if (filter.require_license && !c.metadata.license)
+            return false;
+        if (filter.max_age_days) {
+            const dateField = c.metadata.lastPushedAt || c.metadata.publishedAt;
+            if (dateField) {
+                const age = (Date.now() - new Date(dateField).getTime()) / (1000 * 60 * 60 * 24);
+                if (age > filter.max_age_days)
+                    return false;
+            }
+        }
+        return true;
     });
-    core.info(`Keyword filter: ${candidates.length} → ${filtered.length} candidates`);
+    core.info(`Metadata filter: ${candidates.length} → ${filtered.length} candidates`);
     return filtered;
 }
 
@@ -46242,6 +46473,7 @@ const blogs_1 = __nccwpck_require__(4731);
 const web_pages_1 = __nccwpck_require__(8555);
 const registry_1 = __nccwpck_require__(2667);
 const keywords_1 = __nccwpck_require__(9216);
+const metadata_1 = __nccwpck_require__(445);
 const dedup_1 = __nccwpck_require__(6962);
 const llm_1 = __nccwpck_require__(5178);
 const issues_1 = __nccwpck_require__(3597);
@@ -46266,7 +46498,8 @@ async function collect(config) {
 }
 async function filter(candidates, config) {
     const keywordFiltered = (0, keywords_1.filterCandidates)(candidates, config);
-    return (0, dedup_1.dedup)(keywordFiltered, config);
+    const metadataFiltered = (0, metadata_1.filterByMetadata)(keywordFiltered, config);
+    return (0, dedup_1.dedup)(metadataFiltered, config);
 }
 async function run() {
     try {
@@ -46341,37 +46574,56 @@ exports.createIssues = createIssues;
 exports.buildIssueTitle = buildIssueTitle;
 exports.buildIssueBody = buildIssueBody;
 exports.escapeTableCell = escapeTableCell;
+exports.renderTemplate = renderTemplate;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const retry_1 = __nccwpck_require__(5931);
 function escapeTableCell(value) {
     return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
-function buildIssueTitle(candidate) {
-    return `[Radar] ${escapeTableCell(candidate.title).slice(0, 200)}`;
+function buildIssueTitle(candidate, config) {
+    const prefix = config.issue_template.title_prefix;
+    return `${prefix} ${escapeTableCell(candidate.title).slice(0, 200)}`;
 }
-function buildIssueBody(candidate) {
+function renderTemplate(template, candidate) {
+    return template
+        .replace(/\{\{name\}\}/g, candidate.title)
+        .replace(/\{\{url\}\}/g, candidate.url)
+        .replace(/\{\{description\}\}/g, candidate.description.slice(0, 100))
+        .replace(/\{\{language\}\}/g, candidate.metadata.language ?? "")
+        .replace(/\{\{stars\}\}/g, String(candidate.metadata.stars ?? ""))
+        .replace(/\{\{license\}\}/g, String(candidate.metadata.license ?? ""))
+        .replace(/\{\{source\}\}/g, candidate.source)
+        .replace(/\{\{category\}\}/g, candidate.suggestedCategory);
+}
+function buildIssueBody(candidate, config) {
     const lines = [
         `## Candidate Resource`,
         ``,
         `| Field | Value |`,
         `|-------|-------|`,
-        `| **URL** | ${escapeTableCell(candidate.url)} |`,
-        `| **Source** | ${escapeTableCell(candidate.source)} |`,
-        `| **Relevance Score** | ${candidate.relevanceScore}/100 |`,
-        `| **Suggested Category** | ${escapeTableCell(candidate.suggestedCategory)} |`,
     ];
-    if (candidate.suggestedTags.length > 0) {
-        lines.push(`| **Tags** | ${candidate.suggestedTags.map((t) => `\`${escapeTableCell(t)}\``).join(", ")} |`);
+    const allFields = {
+        url: () => `| **URL** | ${escapeTableCell(candidate.url)} |`,
+        source: () => `| **Source** | ${escapeTableCell(candidate.source)} |`,
+        relevanceScore: () => `| **Relevance Score** | ${candidate.relevanceScore}/100 |`,
+        suggestedCategory: () => `| **Suggested Category** | ${escapeTableCell(candidate.suggestedCategory)} |`,
+        tags: () => candidate.suggestedTags.length > 0 ? `| **Tags** | ${candidate.suggestedTags.map((t) => `\`${escapeTableCell(t)}\``).join(", ")} |` : null,
+        stars: () => candidate.metadata.stars !== undefined ? `| **Stars** | ${candidate.metadata.stars} |` : null,
+        language: () => candidate.metadata.language ? `| **Language** | ${escapeTableCell(candidate.metadata.language)} |` : null,
+        authors: () => candidate.metadata.authors?.length ? `| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |` : null,
+    };
+    const fieldsToShow = config.issue_template.include_fields ?? Object.keys(allFields);
+    for (const field of fieldsToShow) {
+        if (allFields[field]) {
+            const row = allFields[field]();
+            if (row)
+                lines.push(row);
+        }
     }
-    if (candidate.metadata.stars !== undefined) {
-        lines.push(`| **Stars** | ${candidate.metadata.stars} |`);
-    }
-    if (candidate.metadata.language) {
-        lines.push(`| **Language** | ${escapeTableCell(candidate.metadata.language)} |`);
-    }
-    if (candidate.metadata.authors?.length) {
-        lines.push(`| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |`);
-    }
+    const suggestedEntry = config.issue_template.suggested_entry_format
+        ? renderTemplate(config.issue_template.suggested_entry_format, candidate)
+        : `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`;
     if (candidate.metadata.license) {
         lines.push(`| **License** | ${escapeTableCell(candidate.metadata.license)} |`);
     }
@@ -46390,7 +46642,7 @@ function buildIssueBody(candidate) {
     if (candidate.metadata.lastPushedAt) {
         lines.push(`| **Last Pushed** | ${escapeTableCell(candidate.metadata.lastPushedAt)} |`);
     }
-    lines.push(``, `## Description`, ``, "```", (candidate.description || "No description available").slice(0, 1000), "```", ``, `## LLM Reasoning`, ``, "```", (candidate.reasoning || "No reasoning provided").slice(0, 500), "```", ``, `## Suggested Entry`, ``, `\`\`\`markdown`, `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`, `\`\`\``, ``, `---`, `*Generated by [awesome-list-radar](https://github.com/moven0831/awesome-list-radar)*`);
+    lines.push(``, `## Description`, ``, "```", (candidate.description || "No description available").slice(0, 1000), "```", ``, `## LLM Reasoning`, ``, "```", (candidate.reasoning || "No reasoning provided").slice(0, 500), "```", ``, `## Suggested Entry`, ``, `\`\`\`markdown`, suggestedEntry, `\`\`\``, ``, `---`, `*Generated by [awesome-list-radar](https://github.com/moven0831/awesome-list-radar)*`);
     return lines.join("\n");
 }
 function makeGitHubClient(token) {
@@ -46433,7 +46685,7 @@ async function createIssues(candidates, config, dryRun, client) {
     // Fetch existing issues for idempotency check
     let existingIssues = [];
     try {
-        existingIssues = await issueClient.listIssues(labels);
+        existingIssues = await (0, retry_1.withRetry)(() => issueClient.listIssues(labels));
     }
     catch (error) {
         core.warning(`Could not fetch existing issues: ${error instanceof Error ? error.message : String(error)}`);
@@ -46450,8 +46702,8 @@ async function createIssues(candidates, config, dryRun, client) {
             core.info(`Skipping "${candidate.title}" — issue already exists for ${candidate.url}`);
             continue;
         }
-        const title = buildIssueTitle(candidate);
-        const body = buildIssueBody(candidate);
+        const title = buildIssueTitle(candidate, config);
+        const body = buildIssueBody(candidate, config);
         if (dryRun) {
             core.info(`[DRY RUN] Would create issue: ${title}`);
             core.info(`  URL: ${candidate.url}`);
@@ -46460,7 +46712,7 @@ async function createIssues(candidates, config, dryRun, client) {
             continue;
         }
         try {
-            const issue = await issueClient.createIssue(title, body, labels);
+            const issue = await (0, retry_1.withRetry)(() => issueClient.createIssue(title, body, labels));
             core.info(`Created issue #${issue.number}: ${issue.html_url}`);
             created++;
         }
@@ -46582,6 +46834,7 @@ exports.buildArxivQuery = buildArxivQuery;
 exports.buildArxivUrl = buildArxivUrl;
 const core = __importStar(__nccwpck_require__(7484));
 const fast_xml_parser_1 = __nccwpck_require__(9741);
+const retry_1 = __nccwpck_require__(5931);
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 const MAX_DESCRIPTION_LENGTH = 1000;
 function buildArxivQuery(config) {
@@ -46590,13 +46843,17 @@ function buildArxivQuery(config) {
     const catQuery = catParts.length > 1 ? `(${catParts.join(" OR ")})` : catParts[0];
     const kwParts = arxiv.keywords.map((kw) => `all:"${kw}"`);
     const kwQuery = kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
-    return `${catQuery} AND ${kwQuery}`;
+    let query = `${catQuery} AND ${kwQuery}`;
+    if (arxiv.date_range) {
+        query += ` AND submittedDate:[${arxiv.date_range.start} TO ${arxiv.date_range.end}]`;
+    }
+    return query;
 }
-function buildArxivUrl(query) {
+function buildArxivUrl(query, maxResults = 50) {
     const url = new URL(ARXIV_API_URL);
     url.searchParams.set("search_query", query);
     url.searchParams.set("start", "0");
-    url.searchParams.set("max_results", "50");
+    url.searchParams.set("max_results", String(maxResults));
     url.searchParams.set("sortBy", "submittedDate");
     url.searchParams.set("sortOrder", "descending");
     return url.toString();
@@ -46611,14 +46868,18 @@ async function collectArxiv(config, fetchFn = fetch) {
     if (!config.sources.arxiv)
         return [];
     const query = buildArxivQuery(config);
-    const url = buildArxivUrl(query);
+    const url = buildArxivUrl(query, config.sources.arxiv.max_results);
     core.info(`arXiv query URL: ${url}`);
     try {
-        const response = await fetchFn(url);
-        if (!response.ok) {
-            core.warning(`arXiv API returned ${response.status}`);
-            return [];
-        }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetchFn(url);
+            if (!res.ok) {
+                throw Object.assign(new Error(`arXiv API returned ${res.status}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const xml = await response.text();
         const parser = new fast_xml_parser_1.XMLParser({
             ignoreAttributes: false,
@@ -46700,6 +46961,7 @@ exports.collectBlogs = collectBlogs;
 exports.matchesKeywords = matchesKeywords;
 const core = __importStar(__nccwpck_require__(7484));
 const rss_parser_1 = __importDefault(__nccwpck_require__(4208));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function matchesKeywords(text, keywords) {
     const lower = text.toLowerCase();
@@ -46712,7 +46974,7 @@ async function collectBlogs(config, parser) {
     const blogs = config.sources.blogs;
     const results = await Promise.allSettled(blogs.feeds.map(async (feedUrl) => {
         core.info(`Fetching feed: ${feedUrl}`);
-        return { feedUrl, feed: await rssParser.parseURL(feedUrl) };
+        return { feedUrl, feed: await (0, retry_1.withRetry)(() => rssParser.parseURL(feedUrl)) };
     }));
     const candidates = [];
     for (const result of results) {
@@ -46790,8 +47052,9 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.collectGitHub = collectGitHub;
 exports.buildSearchQuery = buildSearchQuery;
 exports.createdAfterDate = createdAfterDate;
-const rest_1 = __nccwpck_require__(4613);
+const rest_1 = __nccwpck_require__(6145);
 const core = __importStar(__nccwpck_require__(7484));
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 function createdAfterDate(spec) {
     const days = parseInt(spec.replace("d", ""), 10);
@@ -46818,6 +47081,15 @@ function buildSearchQuery(topics, config) {
     }
     const after = createdAfterDate(gh.created_after);
     parts.push(`created:>=${after}`);
+    if (gh.exclude_forks) {
+        parts.push("fork:false");
+    }
+    else {
+        parts.push("fork:true");
+    }
+    if (gh.exclude_archived) {
+        parts.push("archived:false");
+    }
     return parts.join(" ");
 }
 async function collectGitHub(config, octokit) {
@@ -46828,33 +47100,45 @@ async function collectGitHub(config, octokit) {
     core.info(`GitHub search query: ${query}`);
     const candidates = [];
     try {
-        // Note: fetches a single page (100 results) sorted by stars.
-        // GitHub Search API supports up to 1000 results via pagination,
-        // but for a radar scan the top 100 by stars is sufficient.
-        const response = await client.search.repos({
-            q: query,
-            sort: "stars",
-            order: "desc",
-            per_page: 100,
-        });
-        for (const repo of response.data.items) {
-            candidates.push({
-                url: repo.html_url,
-                title: repo.full_name,
-                description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
-                source: "github",
-                metadata: {
-                    stars: repo.stargazers_count,
-                    language: repo.language ?? undefined,
-                    topics: repo.topics ?? [],
-                    license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
-                    archived: repo.archived ?? undefined,
-                    fork: repo.fork ?? undefined,
-                    owner: repo.owner?.login ?? undefined,
-                    homepage: repo.homepage || undefined,
-                    lastPushedAt: repo.pushed_at ?? undefined,
-                },
-            });
+        const gh = config.sources.github;
+        const maxResults = gh.max_results;
+        let page = 1;
+        let fetched = 0;
+        while (fetched < maxResults) {
+            const remaining = maxResults - fetched;
+            const perPage = Math.min(remaining, 100);
+            const response = await (0, retry_1.withRetry)(() => client.search.repos({
+                q: query,
+                sort: gh.sort === "best-match" ? undefined : gh.sort,
+                order: "desc",
+                per_page: perPage,
+                page,
+            }));
+            for (const repo of response.data.items) {
+                if (fetched >= maxResults)
+                    break;
+                candidates.push({
+                    url: repo.html_url,
+                    title: repo.full_name,
+                    description: (repo.description ?? "").slice(0, MAX_DESCRIPTION_LENGTH),
+                    source: "github",
+                    metadata: {
+                        stars: repo.stargazers_count,
+                        language: repo.language ?? undefined,
+                        topics: repo.topics ?? [],
+                        license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
+                        archived: repo.archived ?? undefined,
+                        fork: repo.fork ?? undefined,
+                        owner: repo.owner?.login ?? undefined,
+                        homepage: repo.homepage || undefined,
+                        lastPushedAt: repo.pushed_at ?? undefined,
+                    },
+                });
+                fetched++;
+            }
+            if (response.data.items.length < perPage || fetched >= response.data.total_count)
+                break;
+            page++;
         }
     }
     catch (error) {
@@ -47076,6 +47360,7 @@ exports.collectWebPages = collectWebPages;
 const sdk_1 = __importDefault(__nccwpck_require__(121));
 const core = __importStar(__nccwpck_require__(7484));
 const blogs_1 = __nccwpck_require__(4731);
+const retry_1 = __nccwpck_require__(5931);
 const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_HTML_LENGTH = 15_000;
 const SYSTEM_PROMPT = `You are an article link extractor. Given the cleaned text of a web page, extract all article or blog post links you can find.
@@ -47140,27 +47425,40 @@ async function collectWebPages(config, fetchFn, client) {
         return [];
     const webPages = config.sources.web_pages;
     const fetcher = fetchFn ?? fetch;
+    const timeout = webPages.request_timeout;
+    const userAgent = webPages.user_agent;
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
     const results = await Promise.allSettled(webPages.urls.map(async (pageUrl) => {
         core.info(`Fetching web page: ${pageUrl}`);
-        const response = await fetcher(pageUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} for ${pageUrl}`);
+        const fetchOptions = {
+            signal: AbortSignal.timeout(timeout),
+        };
+        if (userAgent) {
+            fetchOptions.headers = { "User-Agent": userAgent };
         }
+        const response = await (0, retry_1.withRetry)(async () => {
+            const res = await fetcher(pageUrl, fetchOptions);
+            if (!res.ok) {
+                throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
+                    status: res.status,
+                });
+            }
+            return res;
+        });
         const html = await response.text();
         const cleaned = cleanHtml(html);
         core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
-        const message = await anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
+        const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
+            model: webPages.model,
             max_tokens: 4096,
-            system: SYSTEM_PROMPT,
+            system: webPages.extraction_prompt || SYSTEM_PROMPT,
             messages: [
                 {
                     role: "user",
                     content: `Extract all article/blog post links from this web page content:\n\n${cleaned}`,
                 },
             ],
-        });
+        }));
         const text = message.content[0].type === "text" ? message.content[0].text : "[]";
         const links = extractFirstJsonArray(text);
         // Resolve relative URLs
@@ -47198,6 +47496,171 @@ async function collectWebPages(config, fetchFn, client) {
         }
     }
     return candidates;
+}
+
+
+/***/ }),
+
+/***/ 2953:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.extractCategories = extractCategories;
+exports.formatCategoryTree = formatCategoryTree;
+function extractCategories(markdown) {
+    const lines = markdown.split("\n");
+    const root = [];
+    const stack = [];
+    for (const line of lines) {
+        const match = line.match(/^(#{2,3})\s+(.+)/);
+        if (!match)
+            continue;
+        const level = match[1].length; // 2 or 3
+        const name = match[2]
+            .replace(/!?\[.*?\]\(.*?\)/g, "") // [text](url) and ![alt](url)
+            .replace(/<!--.*?-->/g, "") // HTML comments
+            .replace(/\{#[^}]+\}/g, "") // {#anchor-id}
+            .trim();
+        if (!name)
+            continue;
+        const node = { name, level, children: [] };
+        // Pop stack until we find parent
+        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+            stack.pop();
+        }
+        if (stack.length === 0) {
+            root.push(node);
+        }
+        else {
+            stack[stack.length - 1].node.children.push(node);
+        }
+        stack.push({ node, level });
+    }
+    return root;
+}
+function formatCategoryTree(nodes, indent = 0) {
+    return nodes
+        .map((node) => {
+        const prefix = "  ".repeat(indent) + "- ";
+        const children = node.children.length > 0
+            ? "\n" + formatCategoryTree(node.children, indent + 1)
+            : "";
+        return prefix + node.name + children;
+    })
+        .join("\n");
+}
+
+
+/***/ }),
+
+/***/ 5931:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withRetry = withRetry;
+const core = __importStar(__nccwpck_require__(7484));
+function getRetryDelay(attempt, options) {
+    const exponential = options.baseDelay * Math.pow(2, attempt);
+    const jitter = Math.random() * options.baseDelay;
+    return Math.min(exponential + jitter, options.maxDelay);
+}
+function getRateLimitDelay(error) {
+    const headers = error.response?.headers;
+    if (!headers)
+        return null;
+    const retryAfter = headers.get("retry-after");
+    if (retryAfter) {
+        const seconds = parseInt(retryAfter, 10);
+        if (!isNaN(seconds))
+            return seconds * 1000;
+        const date = new Date(retryAfter).getTime();
+        if (!isNaN(date))
+            return Math.max(0, date - Date.now());
+    }
+    const rateLimitReset = headers.get("x-ratelimit-reset");
+    if (rateLimitReset) {
+        const resetTime = parseInt(rateLimitReset, 10) * 1000;
+        return Math.max(0, resetTime - Date.now());
+    }
+    return null;
+}
+function isRetryable(error, retryableStatuses) {
+    if (error instanceof Error) {
+        const retryable = error;
+        const status = retryable.status ?? retryable.response?.status;
+        if (status && retryableStatuses.includes(status))
+            return true;
+        if (retryable.message.includes("ECONNRESET") ||
+            retryable.message.includes("ETIMEDOUT") ||
+            retryable.message.includes("ENOTFOUND") ||
+            retryable.message.includes("fetch failed")) {
+            return true;
+        }
+    }
+    return false;
+}
+async function withRetry(fn, options) {
+    const opts = {
+        maxRetries: options?.maxRetries ?? 3,
+        baseDelay: options?.baseDelay ?? 1000,
+        maxDelay: options?.maxDelay ?? 30000,
+        retryableStatuses: options?.retryableStatuses ?? [
+            408, 429, 500, 502, 503, 504,
+        ],
+    };
+    for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+        try {
+            return await fn();
+        }
+        catch (error) {
+            if (attempt === opts.maxRetries ||
+                !isRetryable(error, opts.retryableStatuses)) {
+                throw error;
+            }
+            const rateLimitDelay = getRateLimitDelay(error);
+            const delay = Math.min(rateLimitDelay ?? getRetryDelay(attempt, opts), opts.maxDelay);
+            core.info(`Retry ${attempt + 1}/${opts.maxRetries} after ${Math.round(delay)}ms: ${error instanceof Error ? error.message : String(error)}`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+    }
+    throw new Error("Unreachable: retry loop exited without return or throw");
 }
 
 
@@ -67542,7 +68005,7 @@ exports.NEVER = parseUtil_js_1.INVALID;
 
 /***/ }),
 
-/***/ 4613:
+/***/ 6145:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 "use strict";
@@ -67554,7 +68017,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   Octokit: () => (/* binding */ dist_src_Octokit)
 });
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/universal-user-agent/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/universal-user-agent/index.js
 function getUserAgent() {
   if (typeof navigator === "object" && "userAgent" in navigator) {
     return navigator.userAgent;
@@ -67569,7 +68032,7 @@ function getUserAgent() {
   return "<environment undetectable>";
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/register.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/register.js
 // @ts-check
 
 function register(state, name, method, options) {
@@ -67598,7 +68061,7 @@ function register(state, name, method, options) {
   });
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/add.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/add.js
 // @ts-check
 
 function addHook(state, kind, name, hook) {
@@ -67646,7 +68109,7 @@ function addHook(state, kind, name, hook) {
   });
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/remove.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/remove.js
 // @ts-check
 
 function removeHook(state, name, method) {
@@ -67667,7 +68130,7 @@ function removeHook(state, name, method) {
   state.registry[name].splice(index, 1);
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/index.js
 // @ts-check
 
 
@@ -67714,7 +68177,7 @@ function Collection() {
 
 /* harmony default export */ const before_after_hook = ({ Singular, Collection });
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request/node_modules/@octokit/endpoint/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/endpoint/dist-bundle/index.js
 // pkg/dist-src/defaults.js
 
 
@@ -68062,7 +68525,7 @@ var endpoint = withDefaults(null, DEFAULTS);
 
 // EXTERNAL MODULE: ./node_modules/fast-content-type-parse/index.js
 var fast_content_type_parse = __nccwpck_require__(1120);
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request-error/dist-src/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/request-error/dist-src/index.js
 class RequestError extends Error {
   name;
   /**
@@ -68102,7 +68565,7 @@ class RequestError extends Error {
 }
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/request/dist-bundle/index.js
 // pkg/dist-src/index.js
 
 
@@ -68298,7 +68761,7 @@ function dist_bundle_withDefaults(oldEndpoint, newDefaults) {
 var request = dist_bundle_withDefaults(endpoint, defaults_default);
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/graphql/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/graphql/dist-bundle/index.js
 // pkg/dist-src/index.js
 
 
@@ -68425,7 +68888,7 @@ function withCustomRequest(customRequest) {
 }
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/auth-token/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/auth-token/dist-bundle/index.js
 // pkg/dist-src/is-jwt.js
 var b64url = "(?:[a-zA-Z0-9_-]+)";
 var sep = "\\.";
@@ -68625,11 +69088,11 @@ class Octokit {
 }
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/plugin-request-log/dist-src/version.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/plugin-request-log/dist-src/version.js
 const dist_src_version_VERSION = "5.3.1";
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/plugin-request-log/dist-src/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/plugin-request-log/dist-src/index.js
 
 function requestLog(octokit) {
   octokit.hook.wrap("request", (request, options) => {

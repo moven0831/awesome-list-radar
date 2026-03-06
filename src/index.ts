@@ -7,6 +7,7 @@ import { collectBlogs } from "./sources/blogs";
 import { collectWebPages } from "./sources/web_pages";
 import { collectRegistries } from "./sources/registry";
 import { filterCandidates } from "./filter/keywords";
+import { filterByMetadata } from "./filter/metadata";
 import { dedup } from "./filter/dedup";
 import { classifyCandidates } from "./classifier/llm";
 import { createIssues } from "./output/issues";
@@ -40,7 +41,8 @@ async function filter(
   config: RadarConfig
 ): Promise<Candidate[]> {
   const keywordFiltered = filterCandidates(candidates, config);
-  return dedup(keywordFiltered, config);
+  const metadataFiltered = filterByMetadata(keywordFiltered, config);
+  return dedup(metadataFiltered, config);
 }
 
 async function run(): Promise<void> {
