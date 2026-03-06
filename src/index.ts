@@ -17,10 +17,12 @@ import {
   filterSeenCandidates,
   recordCandidates,
 } from "./state";
+import { createProvider } from "./llm";
+import type { LLMProvider } from "./llm";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
-async function collect(config: RadarConfig): Promise<Candidate[]> {
+async function collect(config: RadarConfig, llmClient?: LLMProvider): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
 
   if (config.sources.github) {
@@ -33,7 +35,7 @@ async function collect(config: RadarConfig): Promise<Candidate[]> {
     candidates.push(...(await collectBlogs(config)));
   }
   if (config.sources.web_pages) {
-    candidates.push(...(await collectWebPages(config)));
+    candidates.push(...(await collectWebPages(config, undefined, llmClient)));
   }
   if (config.sources.registries) {
     candidates.push(...(await collectRegistries(config)));
@@ -50,6 +52,13 @@ async function run(): Promise<void> {
     core.info(`Loading config from ${configPath}`);
     const config = loadConfig(configPath);
 
+    // Create LLM provider
+    const apiKey = core.getInput("llm_api_key") || core.getInput("anthropic_api_key");
+    if (!apiKey) {
+      throw new Error("Either llm_api_key or anthropic_api_key must be provided");
+    }
+    const llmClient = createProvider(config.classification.provider, apiKey);
+
     // Load state
     const state = loadState(config.state_file);
 
@@ -58,7 +67,7 @@ async function run(): Promise<void> {
       result = await runPipeline(
         config,
         {
-          collect,
+          collect: async (cfg) => collect(cfg, llmClient),
           filter: async (candidates, cfg) => {
             // First filter out already-seen candidates
             const unseen = filterSeenCandidates(candidates, state);
@@ -76,7 +85,7 @@ async function run(): Promise<void> {
             return metadataResult;
           },
           classify: async (candidates, cfg) => {
-            const classified = await classifyCandidates(candidates, cfg);
+            const classified = await classifyCandidates(candidates, cfg, llmClient);
 
             // Record accepted (classified) and rejected (below threshold) candidates
             const classifiedUrls = new Set(classified.map((c) => c.url));

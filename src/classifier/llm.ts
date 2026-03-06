@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
+import type { LLMProvider } from "../llm";
 import type { RadarConfig } from "../config";
 import type { Candidate, ClassifiedCandidate } from "../sources/types";
 import {
@@ -176,9 +176,20 @@ function parseClassifyResponse(text: string): ClassifyResult {
 }
 
 export const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
+  // Anthropic
   "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
   "claude-haiku-4-5-20251001": { inputPer1M: 0.8, outputPer1M: 4.0 },
   "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
+  // OpenAI
+  "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
+  "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
+  "gpt-4.1": { inputPer1M: 2.0, outputPer1M: 8.0 },
+  "gpt-4.1-mini": { inputPer1M: 0.4, outputPer1M: 1.6 },
+  "gpt-4.1-nano": { inputPer1M: 0.1, outputPer1M: 0.4 },
+  // Google
+  "gemini-2.0-flash": { inputPer1M: 0.1, outputPer1M: 0.4 },
+  "gemini-2.5-flash-preview-05-20": { inputPer1M: 0.15, outputPer1M: 0.6 },
+  "gemini-2.5-pro-preview-05-06": { inputPer1M: 1.25, outputPer1M: 10.0 },
 };
 
 export function estimateCost(
@@ -200,12 +211,11 @@ export function estimateCost(
 export async function classifyCandidates(
   candidates: Candidate[],
   config: RadarConfig,
-  client?: Anthropic
+  client?: LLMProvider
 ): Promise<ClassifiedCandidate[]> {
   if (candidates.length === 0) return [];
 
-  const anthropic =
-    client ?? new Anthropic({ apiKey: core.getInput("anthropic_api_key") });
+  if (!client) throw new Error("LLM client is required for classification");
 
   const maxClassifications = config.classification.max_classifications_per_run;
   const maxBudget = config.classification.max_budget_usd;
@@ -226,10 +236,10 @@ export async function classifyCandidates(
     }
 
     try {
-      const message = await withRetry(() =>
-        anthropic.messages.create({
+      const response = await withRetry(() =>
+        client.chat({
           model: config.classification.model,
-          max_tokens: 512,
+          maxTokens: 512,
           system: systemPrompt,
           messages: [
             {
@@ -241,8 +251,8 @@ export async function classifyCandidates(
       );
 
       // Track token usage
-      const inputTokens = message.usage?.input_tokens ?? 0;
-      const outputTokens = message.usage?.output_tokens ?? 0;
+      const inputTokens = response.usage.inputTokens;
+      const outputTokens = response.usage.outputTokens;
       const cost = estimateCost(inputTokens, outputTokens, config.classification.model);
 
       totalInputTokens += inputTokens;
@@ -252,8 +262,7 @@ export async function classifyCandidates(
       core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
 
 
-      const text =
-        message.content[0].type === "text" ? message.content[0].text : "";
+      const text = response.text;
       const result = parseClassifyResponse(text);
 
       if (result.relevanceScore >= config.classification.threshold) {
