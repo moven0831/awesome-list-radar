@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "db10ae4997e1",
+  "strategy": "manual-commit",
+  "branch": "feat/llm-provider-agnostic",
+  "checkpoints_count": 23,
+  "files_touched": [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/licenses.txt"
+  ],
+  "sessions": [
+    {
+      "metadata": "/db/10ae4997e1/0/metadata.json",
+      "transcript": "/db/10ae4997e1/0/full.jsonl",
+      "context": "/db/10ae4997e1/0/context.md",
+      "content_hash": "/db/10ae4997e1/0/content_hash.txt",
+      "prompt": "/db/10ae4997e1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 671,
+    "cache_creation_tokens": 236911,
+    "cache_read_tokens": 8246230,
+    "output_tokens": 29648,
+    "api_call_count": 89
+  }
+}
