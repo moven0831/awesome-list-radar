@@ -114,6 +114,60 @@ sources:
     ).toThrow();
   });
 
+  it("parses filter config with all options", () => {
+    const config = parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+filter:
+  include:
+    - gpu
+    - webgpu
+  require_all:
+    - fast
+  exclude:
+    - deprecated
+    - toy
+  exclude_forks: true
+  exclude_archived: true
+  require_license: true
+  max_age_days: 90
+`);
+    expect(config.filter.include).toEqual(["gpu", "webgpu"]);
+    expect(config.filter.require_all).toEqual(["fast"]);
+    expect(config.filter.exclude).toEqual(["deprecated", "toy"]);
+    expect(config.filter.exclude_forks).toBe(true);
+    expect(config.filter.exclude_archived).toBe(true);
+    expect(config.filter.require_license).toBe(true);
+    expect(config.filter.max_age_days).toBe(90);
+  });
+
+  it("applies filter defaults when filter is not specified", () => {
+    const config = parseConfig(fixture("minimal-config.yml"));
+    expect(config.filter).toBeDefined();
+    expect(config.filter.exclude_forks).toBe(false);
+    expect(config.filter.exclude_archived).toBe(false);
+    expect(config.filter.require_license).toBe(false);
+    expect(config.filter.max_age_days).toBeUndefined();
+    expect(config.filter.include).toBeUndefined();
+    expect(config.filter.require_all).toBeUndefined();
+    expect(config.filter.exclude).toBeUndefined();
+  });
+
+  it("rejects invalid max_age_days (negative)", () => {
+    expect(() =>
+      parseConfig(`
+description: test
+sources:
+  github:
+    topics: [test]
+filter:
+  max_age_days: -5
+`)
+    ).toThrow();
+  });
+
   it("accepts web_pages as sole source", () => {
     const config = parseConfig(`
 description: test

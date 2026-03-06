@@ -56,6 +56,18 @@ const SourcesSchema = z.object({
   web_pages: WebPagesSourceSchema.optional(),
 });
 
+const FilterSchema = z
+  .object({
+    include: z.array(z.string()).optional(),
+    require_all: z.array(z.string()).optional(),
+    exclude: z.array(z.string()).optional(),
+    exclude_forks: z.boolean().default(false),
+    exclude_archived: z.boolean().default(false),
+    require_license: z.boolean().default(false),
+    max_age_days: z.number().int().positive().optional(),
+  })
+  .default({});
+
 const ClassificationSchema = z.object({
   model: z.string().default("claude-sonnet-4-6"),
   threshold: z.number().min(0).max(100).default(70),
@@ -82,6 +94,7 @@ export const RadarConfigSchema = z.object({
     (s) => s.github || s.arxiv || s.blogs || s.web_pages,
     "At least one source must be configured"
   ),
+  filter: FilterSchema,
   classification: ClassificationSchema.default({}),
   issue_template: IssueTemplateSchema.default({}),
 });
