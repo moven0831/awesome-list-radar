@@ -14,7 +14,12 @@ export function extractCategories(markdown: string): CategoryNode[] {
     if (!match) continue;
 
     const level = match[1].length; // 2 or 3
-    const name = match[2].trim();
+    const name = match[2]
+      .replace(/!?\[.*?\]\(.*?\)/g, "")   // [text](url) and ![alt](url)
+      .replace(/<!--.*?-->/g, "")          // HTML comments
+      .replace(/\{#[^}]+\}/g, "")         // {#anchor-id}
+      .trim();
+    if (!name) continue;
     const node: CategoryNode = { name, level, children: [] };
 
     // Pop stack until we find parent

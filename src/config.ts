@@ -40,7 +40,7 @@ const ClassificationSchema = z.object({
   max_issues_per_run: z.number().int().positive().default(5),
   system_prompt: z.string().optional(),
   context: z.string().optional(),
-  max_description_length: z.number().int().positive().default(500),
+  max_description_length: z.number().int().positive().max(10000).default(500),
   categories: z.array(z.string()).optional(),
 });
 
