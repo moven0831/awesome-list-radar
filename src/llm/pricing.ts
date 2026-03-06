@@ -22,7 +22,9 @@ export function estimateCost(
 ): number {
   const pricing = MODEL_PRICING[model];
   if (!pricing) {
-    core.warning(`No pricing found for model "${model}"; cost estimates may be inaccurate.`);
+    core.warning(
+      `No pricing found for model "${model}"; falling back to claude-sonnet-4-6 pricing ($3/$15 per 1M tokens). Cost estimates may be inaccurate.`
+    );
   }
   const effectivePricing = pricing ?? DEFAULT_PRICING;
   return (inputTokens * effectivePricing.inputPer1M + outputTokens * effectivePricing.outputPer1M) / 1_000_000;

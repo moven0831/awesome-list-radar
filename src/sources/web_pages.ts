@@ -81,7 +81,10 @@ export async function collectWebPages(
   client?: LLMClient
 ): Promise<Candidate[]> {
   if (!config.sources.web_pages) return [];
-  if (!client) return [];
+  if (!client) {
+    core.warning("collectWebPages: no LLM client provided, skipping web_pages source");
+    return [];
+  }
 
   const webPages = config.sources.web_pages;
   const fetcher = fetchFn ?? fetch;

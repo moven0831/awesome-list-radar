@@ -19,7 +19,6 @@ import {
 } from "./state";
 import { createLLMClient } from "./llm/factory";
 import type { LLMClient } from "./llm/types";
-import type { LLMProvider } from "./llm/factory";
 import type { RadarConfig } from "./config";
 import type { Candidate } from "./sources/types";
 
@@ -56,7 +55,7 @@ async function run(): Promise<void> {
     const config = loadConfig(configPath);
 
     // Construct provider-agnostic LLM client
-    const provider = config.provider as LLMProvider;
+    const provider = config.provider;
     const apiKey =
       provider === "openai"
         ? core.getInput("openai_api_key")
@@ -68,7 +67,15 @@ async function run(): Promise<void> {
       );
     }
 
-    const baseURL = core.getInput("api_base_url") || config.api_base_url;
+    const rawBaseURL = core.getInput("api_base_url") || config.api_base_url;
+    if (rawBaseURL) {
+      try {
+        new URL(rawBaseURL);
+      } catch {
+        throw new Error(`Invalid api_base_url: "${rawBaseURL}" is not a valid URL`);
+      }
+    }
+    const baseURL = rawBaseURL;
     const llmClient = createLLMClient(provider, apiKey, baseURL);
 
     // Load state
