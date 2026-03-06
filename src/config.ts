@@ -74,6 +74,10 @@ const ClassificationSchema = z.object({
   max_classifications_per_run: z.number().int().positive().optional(),
   max_issues_per_run: z.number().int().positive().optional(), // deprecated alias
   max_budget_usd: z.number().positive().optional(),
+  system_prompt: z.string().optional(),
+  context: z.string().optional(),
+  max_description_length: z.number().int().positive().max(10000).default(500),
+  categories: z.array(z.string()).optional(),
 }).transform((val) => ({
   ...val,
   max_classifications_per_run: val.max_classifications_per_run ?? val.max_issues_per_run ?? 5,

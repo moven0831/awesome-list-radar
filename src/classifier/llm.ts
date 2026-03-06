@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import * as core from "@actions/core";
 import type { RadarConfig } from "../config";
 import type { Candidate, ClassifiedCandidate } from "../sources/types";
+import {
+  extractCategories,
+  formatCategoryTree,
+} from "../utils/parse_list";
 import { withRetry } from "../utils/retry";
 
 const SYSTEM_PROMPT = `You are a relevance classifier for an awesome-list curation tool.
@@ -24,17 +29,29 @@ function sanitize(text: string, maxLength: number): string {
   return text.slice(0, maxLength).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
-function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
+function buildUserPrompt(
+  candidate: Candidate,
+  config: RadarConfig,
+  categoryTree?: string
+): string {
+  const maxDescLen = config.classification.max_description_length;
   const parts = [
     `## List Description`,
     config.description,
+  ];
+
+  if (config.classification.context) {
+    parts.push(``, `## Additional Context`, config.classification.context);
+  }
+
+  parts.push(
     ``,
     `## Candidate`,
     `<candidate_title>${sanitize(candidate.title, 200)}</candidate_title>`,
     `<candidate_url>${sanitize(candidate.url, 500)}</candidate_url>`,
     `<candidate_source>${candidate.source}</candidate_source>`,
-    `<candidate_description>${sanitize(candidate.description, 500)}</candidate_description>`,
-  ];
+    `<candidate_description>${sanitize(candidate.description, maxDescLen)}</candidate_description>`
+  );
 
   if (candidate.metadata.stars !== undefined) {
     parts.push(`<candidate_stars>${candidate.metadata.stars}</candidate_stars>`);
@@ -85,8 +102,36 @@ function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
     );
   }
 
+  if (categoryTree) {
+    parts.push(
+      ``,
+      `## Available Categories`,
+      categoryTree,
+      ``,
+      `Pick the most appropriate category from the list above.`
+    );
+  }
+
   parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
   return parts.join("\n");
+}
+
+function loadCategoryTree(config: RadarConfig): string | undefined {
+  // Explicit categories take priority
+  if (config.classification.categories?.length) {
+    return config.classification.categories.map((c) => `- ${c}`).join("\n");
+  }
+
+  // Auto-extract from list file
+  try {
+    const content = readFileSync(config.list_file, "utf-8");
+    const nodes = extractCategories(content);
+    if (nodes.length === 0) return undefined;
+    return formatCategoryTree(nodes);
+  } catch {
+    // File doesn't exist or can't be read — skip gracefully
+    return undefined;
+  }
 }
 
 interface ClassifyResult {
@@ -166,6 +211,8 @@ export async function classifyCandidates(
   const maxBudget = config.classification.max_budget_usd;
   const toClassify = candidates.slice(0, maxClassifications);
   const classified: ClassifiedCandidate[] = [];
+  const systemPrompt = config.classification.system_prompt ?? SYSTEM_PROMPT;
+  const categoryTree = loadCategoryTree(config);
 
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -183,9 +230,12 @@ export async function classifyCandidates(
         anthropic.messages.create({
           model: config.classification.model,
           max_tokens: 512,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           messages: [
-            { role: "user", content: buildUserPrompt(candidate, config) },
+            {
+              role: "user",
+              content: buildUserPrompt(candidate, config, categoryTree),
+            },
           ],
         })
       );
@@ -200,6 +250,7 @@ export async function classifyCandidates(
       totalCost += cost;
 
       core.info(`Classification "${candidate.title}": ${inputTokens} in / ${outputTokens} out tokens ($${cost.toFixed(4)})`);
+
 
       const text =
         message.content[0].type === "text" ? message.content[0].text : "";
@@ -230,5 +281,6 @@ export {
   parseClassifyResponse,
   extractFirstJson,
   sanitize,
+  loadCategoryTree,
   SYSTEM_PROMPT,
 };
