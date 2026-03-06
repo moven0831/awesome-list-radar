@@ -53,6 +53,36 @@ function buildUserPrompt(candidate: Candidate, config: RadarConfig): string {
       `<candidate_topics>${sanitize(candidate.metadata.topics.join(", "), 200)}</candidate_topics>`
     );
   }
+  if (candidate.metadata.license) {
+    parts.push(
+      `<candidate_license>${sanitize(candidate.metadata.license, 50)}</candidate_license>`
+    );
+  }
+  if (candidate.metadata.archived !== undefined) {
+    parts.push(
+      `<candidate_archived>${candidate.metadata.archived}</candidate_archived>`
+    );
+  }
+  if (candidate.metadata.fork !== undefined) {
+    parts.push(
+      `<candidate_fork>${candidate.metadata.fork}</candidate_fork>`
+    );
+  }
+  if (candidate.metadata.owner) {
+    parts.push(
+      `<candidate_owner>${sanitize(candidate.metadata.owner, 100)}</candidate_owner>`
+    );
+  }
+  if (candidate.metadata.homepage) {
+    parts.push(
+      `<candidate_homepage>${sanitize(candidate.metadata.homepage, 500)}</candidate_homepage>`
+    );
+  }
+  if (candidate.metadata.lastPushedAt) {
+    parts.push(
+      `<candidate_last_pushed>${sanitize(candidate.metadata.lastPushedAt, 50)}</candidate_last_pushed>`
+    );
+  }
 
   parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
   return parts.join("\n");

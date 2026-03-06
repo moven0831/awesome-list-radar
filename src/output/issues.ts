@@ -19,7 +19,7 @@ function renderTemplate(template: string, candidate: ClassifiedCandidate): strin
     .replace(/\{\{description\}\}/g, candidate.description.slice(0, 100))
     .replace(/\{\{language\}\}/g, candidate.metadata.language ?? "")
     .replace(/\{\{stars\}\}/g, String(candidate.metadata.stars ?? ""))
-    .replace(/\{\{license\}\}/g, (candidate.metadata as Record<string, unknown>).license as string ?? "")
+    .replace(/\{\{license\}\}/g, String((candidate.metadata as Record<string, unknown>).license ?? ""))
     .replace(/\{\{source\}\}/g, candidate.source)
     .replace(/\{\{category\}\}/g, candidate.suggestedCategory);
 }
@@ -54,6 +54,42 @@ function buildIssueBody(candidate: ClassifiedCandidate, config: RadarConfig): st
   const suggestedEntry = config.issue_template.suggested_entry_format
     ? renderTemplate(config.issue_template.suggested_entry_format, candidate)
     : `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`;
+
+  if (candidate.metadata.license) {
+    lines.push(
+      `| **License** | ${escapeTableCell(candidate.metadata.license)} |`
+    );
+  }
+
+  if (candidate.metadata.archived !== undefined) {
+    lines.push(
+      `| **Archived** | ${candidate.metadata.archived ? "Yes" : "No"} |`
+    );
+  }
+
+  if (candidate.metadata.fork !== undefined) {
+    lines.push(
+      `| **Fork** | ${candidate.metadata.fork ? "Yes" : "No"} |`
+    );
+  }
+
+  if (candidate.metadata.owner) {
+    lines.push(
+      `| **Owner** | ${escapeTableCell(candidate.metadata.owner)} |`
+    );
+  }
+
+  if (candidate.metadata.homepage) {
+    lines.push(
+      `| **Homepage** | ${escapeTableCell(candidate.metadata.homepage)} |`
+    );
+  }
+
+  if (candidate.metadata.lastPushedAt) {
+    lines.push(
+      `| **Last Pushed** | ${escapeTableCell(candidate.metadata.lastPushedAt)} |`
+    );
+  }
 
   lines.push(
     ``,
