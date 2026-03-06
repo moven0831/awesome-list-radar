@@ -20,22 +20,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
-      - run: npm ci
+      - run: bun install
 
       - name: Type check
-        run: npm run lint
+        run: bun run lint
 
       - name: Test
-        run: npm test
+        run: bun test
 
       - name: Build
-        run: npm run build
+        run: bun run build
 
       - name: Verify dist/ is up to date
         run: |
-          git diff --exit-code dist/ || (echo "dist/ is out of date. Run 'npm run build' and commit." && exit 1)
+          git diff --exit-code dist/ || (echo "dist/ is out of date. Run 'bun run build' and commit." && exit 1)
+

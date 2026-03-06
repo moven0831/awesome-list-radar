@@ -23,10 +23,16 @@ const EMPTY_STATE: RadarState = {
 };
 
 export function loadState(filePath: string): RadarState {
+  let content: string;
   try {
-    const content = readFileSync(filePath, "utf-8");
+    content = readFileSync(filePath, "utf-8");
+  } catch {
+    core.info(`No existing state file at "${filePath}", starting fresh`);
+    return { seen_urls: {}, watermarks: {} };
+  }
+
+  try {
     const parsed = JSON.parse(content);
-    // Validate basic structure
     if (
       typeof parsed === "object" &&
       parsed !== null &&
@@ -37,12 +43,11 @@ export function loadState(filePath: string): RadarState {
         watermarks: parsed.watermarks ?? {},
       };
     }
-    core.warning(`Invalid state file structure, starting fresh`);
-    return { ...EMPTY_STATE };
+    core.warning(`Invalid state file structure at "${filePath}", starting fresh`);
   } catch {
-    core.info(`No existing state file at "${filePath}", starting fresh`);
-    return { ...EMPTY_STATE };
+    core.warning(`Corrupt state file at "${filePath}" (invalid JSON), starting fresh`);
   }
+  return { seen_urls: {}, watermarks: {} };
 }
 
 export function saveState(filePath: string, state: RadarState): void {

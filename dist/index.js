@@ -45874,6 +45874,24 @@ function buildUserPrompt(candidate, config) {
     if (candidate.metadata.topics?.length) {
         parts.push(`<candidate_topics>${sanitize(candidate.metadata.topics.join(", "), 200)}</candidate_topics>`);
     }
+    if (candidate.metadata.license) {
+        parts.push(`<candidate_license>${sanitize(candidate.metadata.license, 50)}</candidate_license>`);
+    }
+    if (candidate.metadata.archived !== undefined) {
+        parts.push(`<candidate_archived>${candidate.metadata.archived}</candidate_archived>`);
+    }
+    if (candidate.metadata.fork !== undefined) {
+        parts.push(`<candidate_fork>${candidate.metadata.fork}</candidate_fork>`);
+    }
+    if (candidate.metadata.owner) {
+        parts.push(`<candidate_owner>${sanitize(candidate.metadata.owner, 100)}</candidate_owner>`);
+    }
+    if (candidate.metadata.homepage) {
+        parts.push(`<candidate_homepage>${sanitize(candidate.metadata.homepage, 500)}</candidate_homepage>`);
+    }
+    if (candidate.metadata.lastPushedAt) {
+        parts.push(`<candidate_last_pushed>${sanitize(candidate.metadata.lastPushedAt, 50)}</candidate_last_pushed>`);
+    }
     parts.push(``, `Rate relevance from 0-100 and suggest a category and tags.`);
     return parts.join("\n");
 }
@@ -46244,32 +46262,37 @@ async function run() {
         const config = (0, config_1.loadConfig)(configPath);
         // Load state
         const state = (0, state_1.loadState)(config.state_file);
-        const result = await (0, pipeline_1.runPipeline)(config, {
-            collect,
-            filter: async (candidates, cfg) => {
-                // First filter out already-seen candidates
-                const unseen = (0, state_1.filterSeenCandidates)(candidates, state);
-                // Then apply keyword filtering and dedup
-                const keywordFiltered = (0, keywords_1.filterCandidates)(unseen, cfg);
-                const metadataResult = (0, dedup_1.dedup)(keywordFiltered, cfg);
-                // Record candidates that were filtered out
-                const filteredOut = unseen.filter((c) => !metadataResult.includes(c));
-                (0, state_1.recordCandidates)(state, filteredOut, "filtered");
-                return metadataResult;
-            },
-            classify: async (candidates, cfg) => {
-                const classified = await (0, llm_1.classifyCandidates)(candidates, cfg);
-                // Record accepted (classified) and rejected (below threshold) candidates
-                const classifiedUrls = new Set(classified.map((c) => c.url));
-                const rejected = candidates.filter((c) => !classifiedUrls.has(c.url));
-                (0, state_1.recordCandidates)(state, classified, "accepted");
-                (0, state_1.recordCandidates)(state, rejected, "rejected");
-                return classified;
-            },
-            output: issues_1.createIssues,
-        }, dryRun);
-        // Save state
-        (0, state_1.saveState)(config.state_file, state);
+        let result;
+        try {
+            result = await (0, pipeline_1.runPipeline)(config, {
+                collect,
+                filter: async (candidates, cfg) => {
+                    // First filter out already-seen candidates
+                    const unseen = (0, state_1.filterSeenCandidates)(candidates, state);
+                    // Then apply keyword filtering and dedup
+                    const keywordFiltered = (0, keywords_1.filterCandidates)(unseen, cfg);
+                    const metadataResult = (0, dedup_1.dedup)(keywordFiltered, cfg);
+                    // Record candidates that were filtered out
+                    const filteredOut = unseen.filter((c) => !metadataResult.includes(c));
+                    (0, state_1.recordCandidates)(state, filteredOut, "filtered");
+                    return metadataResult;
+                },
+                classify: async (candidates, cfg) => {
+                    const classified = await (0, llm_1.classifyCandidates)(candidates, cfg);
+                    // Record accepted (classified) and rejected (below threshold) candidates
+                    const classifiedUrls = new Set(classified.map((c) => c.url));
+                    const rejected = candidates.filter((c) => !classifiedUrls.has(c.url));
+                    (0, state_1.recordCandidates)(state, classified, "accepted");
+                    (0, state_1.recordCandidates)(state, rejected, "rejected");
+                    return classified;
+                },
+                output: issues_1.createIssues,
+            }, dryRun);
+        }
+        finally {
+            // Save state regardless of pipeline success/failure
+            (0, state_1.saveState)(config.state_file, state);
+        }
         core.setOutput("candidates_found", result.candidatesFound);
         core.setOutput("candidates_filtered", result.candidatesFiltered);
         core.setOutput("issues_created", result.issuesCreated);
@@ -46361,6 +46384,24 @@ function buildIssueBody(candidate) {
     }
     if (candidate.metadata.authors?.length) {
         lines.push(`| **Authors** | ${escapeTableCell(candidate.metadata.authors.join(", "))} |`);
+    }
+    if (candidate.metadata.license) {
+        lines.push(`| **License** | ${escapeTableCell(candidate.metadata.license)} |`);
+    }
+    if (candidate.metadata.archived !== undefined) {
+        lines.push(`| **Archived** | ${candidate.metadata.archived ? "Yes" : "No"} |`);
+    }
+    if (candidate.metadata.fork !== undefined) {
+        lines.push(`| **Fork** | ${candidate.metadata.fork ? "Yes" : "No"} |`);
+    }
+    if (candidate.metadata.owner) {
+        lines.push(`| **Owner** | ${escapeTableCell(candidate.metadata.owner)} |`);
+    }
+    if (candidate.metadata.homepage) {
+        lines.push(`| **Homepage** | ${escapeTableCell(candidate.metadata.homepage)} |`);
+    }
+    if (candidate.metadata.lastPushedAt) {
+        lines.push(`| **Last Pushed** | ${escapeTableCell(candidate.metadata.lastPushedAt)} |`);
     }
     lines.push(``, `## Description`, ``, "```", (candidate.description || "No description available").slice(0, 1000), "```", ``, `## LLM Reasoning`, ``, "```", (candidate.reasoning || "No reasoning provided").slice(0, 500), "```", ``, `## Suggested Entry`, ``, `\`\`\`markdown`, `- [${candidate.title}](${candidate.url}) - ${candidate.description.slice(0, 100)}`, `\`\`\``, ``, `---`, `*Generated by [awesome-list-radar](https://github.com/moven0831/awesome-list-radar)*`);
     return lines.join("\n");
@@ -46762,7 +46803,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.collectGitHub = collectGitHub;
 exports.buildSearchQuery = buildSearchQuery;
 exports.createdAfterDate = createdAfterDate;
-const rest_1 = __nccwpck_require__(6145);
+const rest_1 = __nccwpck_require__(413);
 const core = __importStar(__nccwpck_require__(7484));
 const MAX_DESCRIPTION_LENGTH = 1000;
 function createdAfterDate(spec) {
@@ -46819,6 +46860,12 @@ async function collectGitHub(config, octokit) {
                     stars: repo.stargazers_count,
                     language: repo.language ?? undefined,
                     topics: repo.topics ?? [],
+                    license: repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION" ? repo.license.spdx_id : undefined,
+                    archived: repo.archived ?? undefined,
+                    fork: repo.fork ?? undefined,
+                    owner: repo.owner?.login ?? undefined,
+                    homepage: repo.homepage || undefined,
+                    lastPushedAt: repo.pushed_at ?? undefined,
                 },
             });
         }
@@ -47059,10 +47106,16 @@ const EMPTY_STATE = {
     watermarks: {},
 };
 function loadState(filePath) {
+    let content;
     try {
-        const content = (0, node_fs_1.readFileSync)(filePath, "utf-8");
+        content = (0, node_fs_1.readFileSync)(filePath, "utf-8");
+    }
+    catch {
+        core.info(`No existing state file at "${filePath}", starting fresh`);
+        return { seen_urls: {}, watermarks: {} };
+    }
+    try {
         const parsed = JSON.parse(content);
-        // Validate basic structure
         if (typeof parsed === "object" &&
             parsed !== null &&
             typeof parsed.seen_urls === "object") {
@@ -47071,13 +47124,12 @@ function loadState(filePath) {
                 watermarks: parsed.watermarks ?? {},
             };
         }
-        core.warning(`Invalid state file structure, starting fresh`);
-        return { ...EMPTY_STATE };
+        core.warning(`Invalid state file structure at "${filePath}", starting fresh`);
     }
     catch {
-        core.info(`No existing state file at "${filePath}", starting fresh`);
-        return { ...EMPTY_STATE };
+        core.warning(`Corrupt state file at "${filePath}" (invalid JSON), starting fresh`);
     }
+    return { seen_urls: {}, watermarks: {} };
 }
 function saveState(filePath, state) {
     (0, node_fs_1.writeFileSync)(filePath, JSON.stringify(state, null, 2), "utf-8");
@@ -67449,7 +67501,7 @@ exports.NEVER = parseUtil_js_1.INVALID;
 
 /***/ }),
 
-/***/ 6145:
+/***/ 413:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 "use strict";
@@ -67461,7 +67513,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   Octokit: () => (/* binding */ dist_src_Octokit)
 });
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/universal-user-agent/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/universal-user-agent/index.js
 function getUserAgent() {
   if (typeof navigator === "object" && "userAgent" in navigator) {
     return navigator.userAgent;
@@ -67476,7 +67528,7 @@ function getUserAgent() {
   return "<environment undetectable>";
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/register.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/register.js
 // @ts-check
 
 function register(state, name, method, options) {
@@ -67505,7 +67557,7 @@ function register(state, name, method, options) {
   });
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/add.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/add.js
 // @ts-check
 
 function addHook(state, kind, name, hook) {
@@ -67553,7 +67605,7 @@ function addHook(state, kind, name, hook) {
   });
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/lib/remove.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/lib/remove.js
 // @ts-check
 
 function removeHook(state, name, method) {
@@ -67574,7 +67626,7 @@ function removeHook(state, name, method) {
   state.registry[name].splice(index, 1);
 }
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/before-after-hook/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/before-after-hook/index.js
 // @ts-check
 
 
@@ -67621,7 +67673,7 @@ function Collection() {
 
 /* harmony default export */ const before_after_hook = ({ Singular, Collection });
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/endpoint/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request/node_modules/@octokit/endpoint/dist-bundle/index.js
 // pkg/dist-src/defaults.js
 
 
@@ -67969,7 +68021,7 @@ var endpoint = withDefaults(null, DEFAULTS);
 
 // EXTERNAL MODULE: ./node_modules/fast-content-type-parse/index.js
 var fast_content_type_parse = __nccwpck_require__(1120);
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/request-error/dist-src/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request-error/dist-src/index.js
 class RequestError extends Error {
   name;
   /**
@@ -68009,7 +68061,7 @@ class RequestError extends Error {
 }
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/request/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/request/dist-bundle/index.js
 // pkg/dist-src/index.js
 
 
@@ -68205,7 +68257,7 @@ function dist_bundle_withDefaults(oldEndpoint, newDefaults) {
 var request = dist_bundle_withDefaults(endpoint, defaults_default);
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/graphql/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/graphql/dist-bundle/index.js
 // pkg/dist-src/index.js
 
 
@@ -68332,7 +68384,7 @@ function withCustomRequest(customRequest) {
 }
 
 
-;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/auth-token/dist-bundle/index.js
+;// CONCATENATED MODULE: ./node_modules/@octokit/rest/node_modules/@octokit/core/node_modules/@octokit/auth-token/dist-bundle/index.js
 // pkg/dist-src/is-jwt.js
 var b64url = "(?:[a-zA-Z0-9_-]+)";
 var sep = "\\.";
