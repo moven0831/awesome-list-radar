@@ -85,6 +85,9 @@ const ClassificationSchema = z.object({
 
 const IssueTemplateSchema = z.object({
   labels: z.array(z.string()).default(["radar", "needs-review"]),
+  title_prefix: z.string().default("[Radar]"),
+  include_fields: z.array(z.enum(["url", "source", "relevanceScore", "suggestedCategory", "tags", "stars", "language", "authors"])).optional(),
+  suggested_entry_format: z.string().optional(),
 });
 
 export const RadarConfigSchema = z.object({

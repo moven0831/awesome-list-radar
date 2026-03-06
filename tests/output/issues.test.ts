@@ -4,6 +4,7 @@ import {
   buildIssueTitle,
   buildIssueBody,
   escapeTableCell,
+  renderTemplate,
   type IssueClient,
 } from "../../src/output/issues";
 import type { RadarConfig } from "../../src/config";
@@ -26,7 +27,7 @@ const baseConfig = {
     threshold: 70,
     max_classifications_per_run: 5,
   },
-  issue_template: { labels: ["radar", "needs-review"] },
+  issue_template: { labels: ["radar", "needs-review"], title_prefix: "[Radar]" },
 } as RadarConfig;
 
 const mockClassified: ClassifiedCandidate = {
@@ -63,18 +64,26 @@ describe("escapeTableCell", () => {
 
 describe("buildIssueTitle", () => {
   it("prefixes with [Radar]", () => {
-    expect(buildIssueTitle(mockClassified)).toBe("[Radar] test/repo");
+    expect(buildIssueTitle(mockClassified, baseConfig)).toBe("[Radar] test/repo");
   });
 
   it("escapes pipe characters in title", () => {
     const candidate = { ...mockClassified, title: "repo | with pipes" };
-    expect(buildIssueTitle(candidate)).toBe("[Radar] repo \\| with pipes");
+    expect(buildIssueTitle(candidate, baseConfig)).toBe("[Radar] repo \\| with pipes");
+  });
+
+  it("uses custom title_prefix", () => {
+    const config = {
+      ...baseConfig,
+      issue_template: { ...baseConfig.issue_template, title_prefix: "[New]" },
+    } as RadarConfig;
+    expect(buildIssueTitle(mockClassified, config)).toBe("[New] test/repo");
   });
 });
 
 describe("buildIssueBody", () => {
   it("includes all candidate details", () => {
-    const body = buildIssueBody(mockClassified);
+    const body = buildIssueBody(mockClassified, baseConfig);
 
     expect(body).toContain("https://github.com/test/repo");
     expect(body).toContain("github");
@@ -89,7 +98,7 @@ describe("buildIssueBody", () => {
   });
 
   it("wraps description and reasoning in code blocks", () => {
-    const body = buildIssueBody(mockClassified);
+    const body = buildIssueBody(mockClassified, baseConfig);
 
     // Check description is in code block
     expect(body).toMatch(/```\nA great GPU library\n```/);
@@ -104,7 +113,7 @@ describe("buildIssueBody", () => {
       suggestedTags: [],
     };
 
-    const body = buildIssueBody(candidate);
+    const body = buildIssueBody(candidate, baseConfig);
     expect(body).not.toContain("Stars");
     expect(body).not.toContain("Language");
     expect(body).not.toContain("Tags");
@@ -126,7 +135,7 @@ describe("buildIssueBody", () => {
       },
     };
 
-    const body = buildIssueBody(candidate);
+    const body = buildIssueBody(candidate, baseConfig);
     expect(body).toContain("| **License** | MIT |");
     expect(body).toContain("| **Archived** | No |");
     expect(body).toContain("| **Fork** | Yes |");
@@ -142,9 +151,61 @@ describe("buildIssueBody", () => {
       metadata: { language: "C|C++" },
     };
 
-    const body = buildIssueBody(candidate);
+    const body = buildIssueBody(candidate, baseConfig);
     expect(body).toContain("Tools \\| Libraries");
     expect(body).toContain("C\\|C++");
+  });
+
+  it("include_fields limits which metadata rows appear", () => {
+    const config = {
+      ...baseConfig,
+      issue_template: { ...baseConfig.issue_template, include_fields: ["url", "stars"] },
+    } as RadarConfig;
+    const body = buildIssueBody(mockClassified, config);
+
+    expect(body).toContain("**URL**");
+    expect(body).toContain("**Stars**");
+    expect(body).not.toContain("**Source**");
+    expect(body).not.toContain("**Relevance Score**");
+    expect(body).not.toContain("**Suggested Category**");
+    expect(body).not.toContain("**Tags**");
+    expect(body).not.toContain("**Language**");
+  });
+
+  it("suggested_entry_format renders with candidate data", () => {
+    const config = {
+      ...baseConfig,
+      issue_template: {
+        ...baseConfig.issue_template,
+        suggested_entry_format: "- [{{name}}]({{url}}) {{stars}} stars, {{language}}",
+      },
+    } as RadarConfig;
+    const body = buildIssueBody(mockClassified, config);
+
+    expect(body).toContain("- [test/repo](https://github.com/test/repo) 42 stars, Rust");
+  });
+
+  it("default behavior unchanged without new config fields", () => {
+    const body = buildIssueBody(mockClassified, baseConfig);
+    expect(body).toContain("- [test/repo](https://github.com/test/repo) - A great GPU library");
+  });
+});
+
+describe("renderTemplate", () => {
+  it("replaces all supported placeholders", () => {
+    const template = "{{name}} at {{url}} ({{source}}) - {{description}} [{{language}}, {{stars}} stars, {{category}}]";
+    const result = renderTemplate(template, mockClassified);
+    expect(result).toBe("test/repo at https://github.com/test/repo (github) - A great GPU library [Rust, 42 stars, Libraries]");
+  });
+
+  it("handles missing optional fields gracefully", () => {
+    const candidate: ClassifiedCandidate = {
+      ...mockClassified,
+      metadata: {},
+    };
+    const template = "{{name}} - {{language}} {{stars}} {{license}}";
+    const result = renderTemplate(template, candidate);
+    expect(result).toBe("test/repo -   ");
   });
 });
 
