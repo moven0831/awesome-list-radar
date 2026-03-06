@@ -45995,6 +45995,20 @@ const GithubSourceSchema = zod_1.z.object({
 const ArxivSourceSchema = zod_1.z.object({
     categories: zod_1.z.array(zod_1.z.string()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).min(1),
+    max_results: zod_1.z.number().int().min(1).max(500).default(50),
+    date_range: zod_1.z
+        .object({
+        start: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+        end: zod_1.z
+            .string()
+            .regex(/^\d{8}(\d{6})?$/, "Must be YYYYMMDD or YYYYMMDDHHMMSS"),
+    })
+        .refine((r) => r.start <= r.end, {
+        message: "date_range.start must be <= date_range.end",
+    })
+        .optional(),
 });
 const BlogsSourceSchema = zod_1.z.object({
     feeds: zod_1.z.array(zod_1.z.string().url()).min(1),
@@ -46003,6 +46017,10 @@ const BlogsSourceSchema = zod_1.z.object({
 const WebPagesSourceSchema = zod_1.z.object({
     urls: zod_1.z.array(zod_1.z.string().url()).min(1),
     keywords: zod_1.z.array(zod_1.z.string()).optional(),
+    extraction_prompt: zod_1.z.string().min(1).optional(),
+    model: zod_1.z.string().min(1).default("claude-haiku-4-5-20251001"),
+    request_timeout: zod_1.z.number().int().min(1000).max(120000).default(30000),
+    user_agent: zod_1.z.string().optional(),
 });
 const SourcesSchema = zod_1.z.object({
     github: GithubSourceSchema.optional(),
@@ -46585,13 +46603,17 @@ function buildArxivQuery(config) {
     const catQuery = catParts.length > 1 ? `(${catParts.join(" OR ")})` : catParts[0];
     const kwParts = arxiv.keywords.map((kw) => `all:"${kw}"`);
     const kwQuery = kwParts.length > 1 ? `(${kwParts.join(" OR ")})` : kwParts[0];
-    return `${catQuery} AND ${kwQuery}`;
+    let query = `${catQuery} AND ${kwQuery}`;
+    if (arxiv.date_range) {
+        query += ` AND submittedDate:[${arxiv.date_range.start} TO ${arxiv.date_range.end}]`;
+    }
+    return query;
 }
-function buildArxivUrl(query) {
+function buildArxivUrl(query, maxResults = 50) {
     const url = new URL(ARXIV_API_URL);
     url.searchParams.set("search_query", query);
     url.searchParams.set("start", "0");
-    url.searchParams.set("max_results", "50");
+    url.searchParams.set("max_results", String(maxResults));
     url.searchParams.set("sortBy", "submittedDate");
     url.searchParams.set("sortOrder", "descending");
     return url.toString();
@@ -46606,7 +46628,7 @@ async function collectArxiv(config, fetchFn = fetch) {
     if (!config.sources.arxiv)
         return [];
     const query = buildArxivQuery(config);
-    const url = buildArxivUrl(query);
+    const url = buildArxivUrl(query, config.sources.arxiv.max_results);
     core.info(`arXiv query URL: ${url}`);
     try {
         const response = await (0, retry_1.withRetry)(async () => {
@@ -47002,11 +47024,19 @@ async function collectWebPages(config, fetchFn, client) {
         return [];
     const webPages = config.sources.web_pages;
     const fetcher = fetchFn ?? fetch;
+    const timeout = webPages.request_timeout;
+    const userAgent = webPages.user_agent;
     const anthropic = client ?? new sdk_1.default({ apiKey: core.getInput("anthropic_api_key") });
     const results = await Promise.allSettled(webPages.urls.map(async (pageUrl) => {
         core.info(`Fetching web page: ${pageUrl}`);
+        const fetchOptions = {
+            signal: AbortSignal.timeout(timeout),
+        };
+        if (userAgent) {
+            fetchOptions.headers = { "User-Agent": userAgent };
+        }
         const response = await (0, retry_1.withRetry)(async () => {
-            const res = await fetcher(pageUrl);
+            const res = await fetcher(pageUrl, fetchOptions);
             if (!res.ok) {
                 throw Object.assign(new Error(`HTTP ${res.status} for ${pageUrl}`), {
                     status: res.status,
@@ -47018,9 +47048,9 @@ async function collectWebPages(config, fetchFn, client) {
         const cleaned = cleanHtml(html);
         core.info(`Extracting links from ${pageUrl} (${cleaned.length} chars)`);
         const message = await (0, retry_1.withRetry)(() => anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
+            model: webPages.model,
             max_tokens: 4096,
-            system: SYSTEM_PROMPT,
+            system: webPages.extraction_prompt || SYSTEM_PROMPT,
             messages: [
                 {
                     role: "user",
