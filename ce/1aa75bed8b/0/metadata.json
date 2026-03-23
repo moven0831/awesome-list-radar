@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "ce1aa75bed8b",
+  "session_id": "9ec915e1-3a95-4913-9061-bac204eda3a9",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-23T08:53:03.977035Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/specs/2026-03-23-issue-dedup-design.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b7ff78633f17",
+  "token_usage": {
+    "input_tokens": 125,
+    "cache_creation_tokens": 51102,
+    "cache_read_tokens": 1195598,
+    "output_tokens": 6984,
+    "api_call_count": 31
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-23T08:53:03.896912Z",
+    "agent_lines": 59,
+    "human_added": 1,
+    "human_modified": 2,
+    "human_removed": 0,
+    "total_committed": 62,
+    "agent_percentage": 95.16129032258065
+  }
+}

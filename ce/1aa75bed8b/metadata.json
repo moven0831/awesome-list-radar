@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "ce1aa75bed8b",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/specs/2026-03-23-issue-dedup-design.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ce/1aa75bed8b/0/metadata.json",
+      "transcript": "/ce/1aa75bed8b/0/full.jsonl",
+      "context": "/ce/1aa75bed8b/0/context.md",
+      "content_hash": "/ce/1aa75bed8b/0/content_hash.txt",
+      "prompt": "/ce/1aa75bed8b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 125,
+    "cache_creation_tokens": 51102,
+    "cache_read_tokens": 1195598,
+    "output_tokens": 6984,
+    "api_call_count": 31
+  }
+}
