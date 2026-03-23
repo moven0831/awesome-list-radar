@@ -24,8 +24,9 @@ Use GitHub Issues (open + closed, with radar labels) as the primary source of tr
 
 **New:** Fetches **all** issues (open + closed) with pagination:
 - Change `state: "open"` to `state: "all"`
-- Add a pagination loop: fetch pages of 100 until an empty page is returned
+- Add a pagination loop: fetch pages of 100, terminate when `data.length < per_page` (partial page = last page)
 - Flatten all pages into the returned array
+- Log total count after pagination: `"Fetched N existing issues (open+closed) for dedup"`
 
 Interface change: `listIssues(labels: string[])` signature stays the same; only the implementation changes.
 
@@ -58,4 +59,4 @@ Add tests for:
 
 - Persisting the state file via git commit or Actions cache (not needed with issues as source of truth)
 - Maintainer feedback loop beyond close/open (e.g., labels for "never suggest again")
-- Handling >1000 total radar issues (GitHub API pagination limit; unlikely for awesome-list repos)
+- Adding a safety cap on pagination (the REST `listForRepo` API has no hard limit; performance is the concern, but awesome-list repos are unlikely to have thousands of radar issues)
