@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import type { RadarConfig } from "../config";
 import type { ClassifiedCandidate } from "../sources/types";
 import { withRetry } from "../utils/retry";
+import { normalizeUrl } from "../filter/dedup";
 
 function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -191,15 +192,15 @@ export async function createIssues(
         const match = issue.body?.match(
           /\| \*\*URL\*\* \| (https?:\/\/[^\s|]+)/
         );
-        return match?.[1]?.toLowerCase();
+        return match?.[1] ? normalizeUrl(match[1]) : undefined;
       })
-      .filter(Boolean)
+      .filter((url): url is string => url !== undefined)
   );
 
   let created = 0;
 
   for (const candidate of candidates) {
-    if (existingUrls.has(candidate.url.toLowerCase())) {
+    if (existingUrls.has(normalizeUrl(candidate.url))) {
       core.info(
         `Skipping "${candidate.title}" — issue already exists for ${candidate.url}`
       );
