@@ -135,20 +135,33 @@ function makeGitHubClient(token: string): IssueClient {
 
   return {
     async listIssues(labels: string[]) {
-      // Note: fetches up to 100 open issues. Repos with >100 open radar
-      // issues may see duplicate issue creation. Use GitHub search API
-      // for more robust dedup if this becomes an issue.
-      const { data } = await octokit.rest.issues.listForRepo({
-        owner,
-        repo,
-        state: "open",
-        labels: labels.join(","),
-        per_page: 100,
-      });
-      return data.map((i) => ({
-        title: i.title,
-        body: i.body ?? undefined,
-      }));
+      const allIssues: { title: string; body?: string }[] = [];
+      let page = 1;
+      const perPage = 100;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { data } = await octokit.rest.issues.listForRepo({
+          owner,
+          repo,
+          state: "all",
+          labels: labels.join(","),
+          per_page: perPage,
+          page,
+        });
+
+        for (const i of data) {
+          allIssues.push({ title: i.title, body: i.body ?? undefined });
+        }
+
+        if (data.length < perPage) break;
+        page++;
+      }
+
+      core.info(
+        `Fetched ${allIssues.length} existing issues (open+closed) for dedup`
+      );
+      return allIssues;
     },
 
     async createIssue(title: string, body: string, labels: string[]) {
