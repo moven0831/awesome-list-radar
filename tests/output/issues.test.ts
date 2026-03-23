@@ -238,12 +238,12 @@ describe("createIssues", () => {
     expect(client.createIssue).not.toHaveBeenCalled();
   });
 
-  it("idempotency check is case-insensitive", async () => {
+  it("idempotency check is case-insensitive and normalized", async () => {
     const client = mockClient();
     client.listIssues.mockResolvedValue([
       {
         title: "[Radar] test/repo",
-        body: "| **URL** | https://GitHub.com/Test/Repo |",
+        body: "| **URL** | http://www.GitHub.com/Test/Repo/ |",
       },
     ]);
 
